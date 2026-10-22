@@ -23,6 +23,10 @@ async def lifespan(app: FastAPI):
     # Startup: only touch the database once the app has been configured.
     # Before first-run setup there is no database to talk to.
     if is_configured():
+        from app.db.migrations import ensure_schema_current
+        from app.db.session import SessionLocal
+        async with SessionLocal() as db:
+            await ensure_schema_current(db)
         await reload_embedding_function()
     else:
         logger.warning("No database configured yet - starting in setup mode.")

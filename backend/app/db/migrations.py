@@ -11,6 +11,20 @@ from typing import Optional
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
+from sqlalchemy import text
+
+
+class SchemaVersionError(RuntimeError):
+    pass
+
+
+async def ensure_schema_current(db) -> None:
+    """Read-only startup guard for direct API and standalone Worker entrypoints."""
+    expected = set(ScriptDirectory.from_config(_alembic_config()).get_heads())
+    current = set((await db.execute(text("SELECT version_num FROM alembic_version"))).scalars())
+    if current != expected:
+        raise SchemaVersionError("数据库结构尚未完成升级，请先运行维护升级；API/Worker 未启动")
 
 
 def _base_dir() -> Path:

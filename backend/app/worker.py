@@ -117,11 +117,15 @@ async def wait_for_schema() -> None:
     table here prevents the worker from querying (and erroring on) tables that
     have not been created yet.
     """
+    from app.db.migrations import ensure_schema_current, SchemaVersionError
     while True:
         try:
             async with SessionLocal() as db:
                 await db.execute(text("SELECT 1 FROM import_tasks LIMIT 1"))
+                await ensure_schema_current(db)
             return
+        except SchemaVersionError:
+            raise
         except Exception:
             logger.info("Worker: waiting for database schema (migrations)...")
             await asyncio.sleep(5)

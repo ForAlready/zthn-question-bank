@@ -148,7 +148,7 @@ class _Server:
             try:
                 run_migrations(get_db_url())
             except Exception as exc:  # noqa: BLE001
-                print(f"[tray] migration failed: {exc}", file=sys.stderr)
+                raise RuntimeError("数据库升级失败；服务未启动") from exc
 
     def start(self, lan: bool) -> None:
         import uvicorn

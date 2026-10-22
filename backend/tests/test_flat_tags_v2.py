@@ -314,6 +314,16 @@ async def test_persistence_failure_rolls_back_all_papers(client, bank, db_sessio
     assert (await db_session.execute(select(func.count()).select_from(ExamPaperBatch))).scalar_one() == 0
 
 
+async def test_startup_rejects_legacy_schema(db_session):
+    from sqlalchemy import text
+    from app.db.migrations import ensure_schema_current, SchemaVersionError
+    await db_session.execute(text('CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)'))
+    await db_session.execute(text("INSERT INTO alembic_version VALUES ('f7a8b9c0d1e2')"))
+    with pytest.raises(SchemaVersionError): await ensure_schema_current(db_session)
+    await db_session.execute(text("UPDATE alembic_version SET version_num='a1f2e3d4c5b6'"))
+    await ensure_schema_current(db_session)
+
+
 async def test_ai_tools_only_current_enabled_tags(bank,db_session):
     from app.ai.tools.questions import resolve_tags
     from app.ai.tools.library import get_available_tags

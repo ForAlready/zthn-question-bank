@@ -77,7 +77,7 @@ def run_server() -> None:
         try:
             run_migrations(get_db_url())
         except Exception as exc:  # noqa: BLE001
-            print(f"[launcher] migration failed: {exc}", file=sys.stderr)
+            raise RuntimeError("数据库升级失败，请先完成维护升级；服务未启动") from exc
 
     # Background worker (resilient: it waits internally until configured).
     proc = multiprocessing.Process(target=start_worker, daemon=True)
