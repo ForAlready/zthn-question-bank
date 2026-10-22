@@ -9,11 +9,11 @@ const router = useRouter()
 </script>
 
 <template>
-  <header class="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+  <header class="flex h-14 shrink-0 items-center gap-2 border-b bg-card px-4 md:px-8">
     <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbPage>{{ title }}</BreadcrumbPage>
+              <BreadcrumbPage class="text-base font-semibold text-foreground">{{ title }}</BreadcrumbPage>
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>

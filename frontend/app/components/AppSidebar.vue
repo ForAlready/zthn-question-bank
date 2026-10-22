@@ -49,8 +49,8 @@ const handleLogout = () => {
   router.push('/login')
 }
 
-// 左侧彩色条 + 主题色高亮当前导航项，不修改 ui/sidebar 原始组件
-const navActiveClass = 'border-l-2 border-transparent data-[active=true]:border-l-primary data-[active=true]:bg-primary/10 data-[active=true]:text-primary data-[active=true]:font-medium group-data-[collapsible=icon]:border-l-0'
+// 左侧 3px 指示条 + 浅蓝底高亮当前导航项
+const navActiveClass = 'border-l-[3px] border-transparent data-[active=true]:border-l-primary data-[active=true]:bg-accent data-[active=true]:text-primary data-[active=true]:font-medium group-data-[collapsible=icon]:border-l-0'
 </script>
 
 <template>
