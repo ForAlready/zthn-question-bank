@@ -14,6 +14,14 @@ from .system_setting import SystemSetting, SystemSettingCreate, SystemSettingUpd
 from .subject_prompt import SubjectPromptOut, SubjectPromptUpdate
 from .activity_log import ActivityLog, ActivityLogCreate, ActivityLogPage
 from .import_task import ImportTask, ImportTaskCreate, ImportTaskUpdate
+from .paper_template import (
+    PaperTemplateCreate, PaperTemplateUpdate, PaperTemplateOut,
+    TemplatePart, TemplateSection,
+)
+from .exam_paper import (
+    ExamPaperGenerateRequest, ExamPaperItemScoreUpdate, ExamPaperItemReplaceRequest,
+    ExamPaperItemOut, ExamPaperOut, ExamPaperBatchOut, ExamPaperExportQuery,
+)
 from .composition import (
     FolderCreate, FolderUpdate, FolderRead,
     FolderCreateRequest, FolderUpdateRequest,

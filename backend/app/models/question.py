@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, SmallInteger, Boolean, Text, ForeignKey, Table, Enum,
-    DateTime, JSON, String, text,
+    DateTime, JSON, String, text, Index,
 )
 from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import relationship, backref
@@ -19,7 +19,8 @@ question_tags = Table(
     'question_tags',
     Base.metadata,
     Column('question_id', Integer, ForeignKey('questions.id'), primary_key=True),
-    Column('tag_id', Integer, ForeignKey('tags.id'), primary_key=True)
+    Column('tag_id', Integer, ForeignKey('tags.id'), primary_key=True),
+    Index('ix_question_tags_tag_question', 'tag_id', 'question_id')
 )
 
 # 题目与知识点的多对多关联表
@@ -49,6 +50,7 @@ class QuestionVisibility(str, enum.Enum):
 
 class Question(Base):
     """题目表"""
+
     __tablename__ = 'questions'
 
     id = Column(Integer, primary_key=True, index=True)
@@ -74,7 +76,7 @@ class Question(Base):
 
     deleted_at = Column(DateTime, nullable=True) # 软删除时间
     
-    q_type = Column(Enum(QuestionType, values_callable=lambda obj: [e.value for e in obj]), nullable=False) # 题目类型
+    q_type = Column(Enum(QuestionType, values_callable=lambda obj: [e.value for e in obj]), nullable=False) # 旧枚举（兼容）
     status = Column(String(20), default=QuestionStatus.DRAFT.value, nullable=False) # 状态
     # 可见性:public=学科内共享;private=仅创建者+超管可见。存字符串以便 v2 追加 group 值。
     visibility = Column(

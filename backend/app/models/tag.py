@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Table, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Table, ForeignKey, UniqueConstraint, Boolean
 from sqlalchemy.orm import relationship
 from .base import Base
 
@@ -14,6 +14,9 @@ class Tag(Base):
     # 标签归属的学科（学科级隔离，不同学科允许同名标签）
     subject_id = Column(Integer, ForeignKey('subjects.id'), nullable=False, index=True)
 
+    enabled = Column(Boolean, nullable=False, default=True, server_default="1")
+    seed_key = Column(String(64), nullable=True)
+
     created_by = Column(Integer, ForeignKey('user.id'), nullable=True)
     updated_by = Column(Integer, ForeignKey('user.id'), nullable=True)
 
@@ -28,4 +31,5 @@ class Tag(Base):
 
     __table_args__ = (
         UniqueConstraint('subject_id', 'name', name='uq_tag_subject_name'),
+        UniqueConstraint('subject_id', 'seed_key', name='uq_tag_subject_seed'),
     )

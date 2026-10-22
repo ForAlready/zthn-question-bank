@@ -15,6 +15,8 @@ from .chat import ChatSession, ChatMessage
 from .agent import AgentRun, AgentStep
 from .prompt import PromptTemplate
 from .paper import Paper, PaperQuestion
+from .paper_template import PaperTemplate, PaperTemplateTagRef
+from .exam_paper import ExamPaperBatch, ExamPaper, ExamPaperItem, ExamPaperStatus
 from .composition import (
     ScopeType,
     CompositionStatus,

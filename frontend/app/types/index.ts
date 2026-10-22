@@ -5,6 +5,20 @@ export type {
   RichMark,
 } from './richContent'
 export type {
+  TagFilter,
+  TemplateSection,
+  TemplatePart,
+  PaperTemplate,
+  PaperTemplateCreate,
+  PaperTemplateUpdate,
+  ExamPaperGenerateRequest,
+  ExamPaperItem,
+  ExamPaperStatus,
+  ExamPaper,
+  ExamPaperBatch,
+  ExamPaperExportMode,
+} from './paper'
+export type {
   QuestionType,
   QuestionStatus,
   OptionSpec,
