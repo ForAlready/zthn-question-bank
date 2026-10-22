@@ -5,6 +5,10 @@ export const Capability = {
   MANAGE_SUBJECT: 'manage_subject',
   MANAGE_MEMBERS: 'manage_members',
   VIEW_PRIVATE_ANY: 'view_private_any',
+  MANAGE_PAPER_TEMPLATE: 'manage_paper_template',
+  GENERATE_PAPER: 'generate_paper',
+  EXPORT_PAPER_WITHOUT_ANSWERS: 'export_paper_without_answers',
+  EXPORT_WITH_ANSWERS: 'export_with_answers',
 } as const
 
 export type CapabilityValue = typeof Capability[keyof typeof Capability]
