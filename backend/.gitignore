@@ -20,3 +20,5 @@ static/
 uploads/
 
 .env
+
+.codegraph

@@ -13,6 +13,7 @@
 chromadb_data/
 backend/uploads/
 backend/static/media/
+backend/backups/
 *.sqlite
 *.sqlite3
 *.db
@@ -25,3 +26,19 @@ logs/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
 docs/node_modules/
+
+#dev tool cache
+.cursor/
+openspec/*
+.codegraph/*
+*/.codegraph/*
+.history/
+
+#dev history
+docs/history/
+docs/history/*
+docs/*
+
+# unconfirmed design files
+DESIGN-question-bank.md
+PRD.md
