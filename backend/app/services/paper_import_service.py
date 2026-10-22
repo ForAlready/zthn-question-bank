@@ -129,6 +129,9 @@ def _build_question_create(
     payload.pop("parent_temp_id", None)
     payload.pop("source_number", None)
     payload.pop("warnings", None)
+    payload.pop("raw_type_name", None)
+    payload.pop("raw_answer", None)
+    payload.pop("suggested_tags", None)
     payload.pop("selected", None)
     payload.pop("uid", None)
     payload.setdefault("status", default_status)
@@ -296,6 +299,9 @@ async def commit_paper_import(
             question_in = _build_question_create(
                 raw, subject_id=subject_id, default_status=default_status, source=filename
             )
+            # 在导入预检阶段校验分类与题型，失败项沿用跳过/部分导入流程，避免写入时才失败。
+            if question_in.subject_id != subject_id:
+                raise ValueError("题目所属学科与本次导入学科不一致")
         except (ValidationError, ValueError) as exc:
             logger.warning("paper import: skip question #%d: %s", index, exc)
             skipped.append(

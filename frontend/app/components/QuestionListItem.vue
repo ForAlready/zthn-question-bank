@@ -81,9 +81,9 @@ const typeLabel = computed(() => {
     'multiple_choice': '多选题',
     'true_false': '判断题',
     'fill_in_the_blank': '填空题',
-    'free_response': '解答题'
+    'free_response': '问答题'
   }
-  return types[props.item.q_type] || props.item.q_type
+  return props.item.q_type ? types[props.item.q_type] || props.item.q_type : '待复核'
 })
 
 // Kept intentionally low-saturation so type colors don't compete with the primary theme color.

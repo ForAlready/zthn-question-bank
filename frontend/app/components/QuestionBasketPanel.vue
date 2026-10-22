@@ -38,7 +38,7 @@ const qTypeLabels: Record<string, string> = {
   multiple_choice: '多选',
   true_false: '判断',
   fill_in_the_blank: '填空',
-  free_response: '解答',
+  free_response: '问答题',
 }
 
 const pickerOpen = ref(false)

@@ -39,11 +39,13 @@ export function createDefaultOptions(): OptionSpec[] {
 /**
  * 数据库编辑态草稿：所有富文本槽位为 RichDoc | null（对象，非字符串），
  * answer 为 AnswerSpec 判别联合，options 元素含稳定 id。
+ *
+ * q_type 仅包含五种固定题型；未识别的导入项为 null，须人工复核。
  */
 export interface QuestionDraft {
     id?: number
     content: RichDoc
-    q_type: QuestionType
+    q_type: QuestionType | null
     status: QuestionStatus
     difficulty: number
     visibility: 'public' | 'private'
@@ -61,8 +63,8 @@ export interface QuestionDraft {
 
 export const CHOICE_TYPES: QuestionType[] = ['single_choice', 'multiple_choice']
 
-export function isChoiceType(qType: QuestionType): boolean {
-    return CHOICE_TYPES.includes(qType)
+export function isChoiceType(qType: QuestionType | null): boolean {
+    return qType != null && CHOICE_TYPES.includes(qType)
 }
 
 /** 用 stem 中的 blank 节点顺序构造填空 blanks；无 blank 节点时回退到一个空 blank。 */
@@ -165,6 +167,8 @@ export function dbQuestionToDraft(
 
 /** 智能导入评审项：v2 编辑草稿 + 列表态（选中/警告/AI 建议标签）。 */
 export interface ImportDraft extends QuestionDraft {
+    raw_type_name?: string
+    raw_answer?: unknown
     uid: string
     selected: boolean
     warnings: string[]
@@ -177,7 +181,7 @@ export interface ImportDraft extends QuestionDraft {
 
 /** /upload/* 返回的单条已转 v2 抽取项（后端已清洗题号/标签并转 RichDoc）。 */
 export interface ExtractedQuestionItem {
-    q_type: QuestionType
+    q_type: QuestionType | null
     content: RichDoc
     options?: OptionSpec[] | null
     answer?: AnswerSpec | null
@@ -190,6 +194,9 @@ export interface ExtractedQuestionItem {
     subject_id?: number | null
     ai_suggested_tags?: Record<string, string[]> | null
     warnings?: string[]
+    tag_ids?: number[]
+    raw_type_name?: string
+    raw_answer?: unknown
     temp_id?: string | null
     parent_temp_id?: string | null
     source_number?: string | null
@@ -213,7 +220,7 @@ export function extractedItemToDraft(
     item: ExtractedQuestionItem,
     opts: { subjectId?: number } = {},
 ): ImportDraft {
-    const qType = (item.q_type ?? 'single_choice') as QuestionType
+    const qType = item.q_type ?? null
     const options: OptionSpec[] = (item.options ?? []).map((o, i) => ({
         id: o.id || generateOptionId(),
         label: o.label || nextOptionLabel(i),
@@ -223,6 +230,8 @@ export function extractedItemToDraft(
         uid: generateImportUid(),
         selected: true,
         warnings: item.warnings ?? [],
+        raw_type_name: item.raw_type_name,
+        raw_answer: item.raw_answer,
         ai_suggested_tags: item.ai_suggested_tags ?? undefined,
         temp_id: item.temp_id ?? generateTempId(),
         parent_temp_id: item.parent_temp_id ?? null,
@@ -239,7 +248,7 @@ export function extractedItemToDraft(
         summary: cloneRich(item.summary),
         source: '',
         knowledge_point_ids: item.knowledge_point_ids ?? [],
-        tag_ids: [],
+        tag_ids: item.tag_ids ?? [],
         subject_id: item.subject_id ?? opts.subjectId ?? undefined,
         parent_id: null,
     }
@@ -268,7 +277,7 @@ export function pruneAnswerOptionRef(answer: AnswerSpec | null, removedId: strin
 
 export interface QuestionWritePayload {
     content: RichDoc
-    q_type: QuestionType
+    q_type: QuestionType | null
     options: OptionSpec[] | null
     answer: AnswerSpec | null
     thinking: RichDoc
@@ -314,6 +323,7 @@ function isRichEmpty(doc: RichDoc): boolean {
  * 阻止把非法答案（尤其 legacy_unresolved）发往严格 v2 后端。
  */
 export function validateQuestionDraft(draft: QuestionDraft): string | null {
+    if (!draft.q_type) return '请选择题型'
     if (isRichEmpty(draft.content)) {
         return '题干不能为空'
     }

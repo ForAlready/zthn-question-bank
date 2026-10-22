@@ -140,6 +140,7 @@ def _reject_legacy(answer: Any) -> None:
 
 
 class QuestionCreate(QuestionBase):
+    model_config = {"extra": "forbid"}
     knowledge_point_ids: List[int] = []
     tag_ids: Optional[List[int]] = []
     # 可配置题型树节点；写入时校验归属与可选状态，答案格式仍由 q_type 独立约束。
@@ -282,6 +283,7 @@ class QuestionBatchTags(BaseModel):
 Question.model_rebuild()
 
 class LegacyQuestionCreate(BaseModel):
+    model_config = {"extra":"forbid"}
     content: Optional[str] = None
     q_type: QuestionType
     options: Optional[List[Any]] = None

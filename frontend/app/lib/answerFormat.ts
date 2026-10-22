@@ -50,7 +50,7 @@ const TYPE_LABELS: Record<QuestionType, string> = {
     multiple_choice: '多选题',
     true_false: '判断题',
     fill_in_the_blank: '填空题',
-    free_response: '解答题',
+    free_response: '问答题',
 }
 
 export function questionTypeLabel(qType: QuestionType | string): string {

@@ -32,7 +32,7 @@ import StructuredTemplateGuideDialog from '@/components/StructuredTemplateGuideD
 import PageHeader from '@/components/PageHeader.vue'
 import { toast } from 'vue-sonner'
 import { zipFolder } from '@/lib/zipFolder'
-import type { CompositionFolder, CompositionScope, KnowledgePoint, Subject } from '@/types'
+import type { CompositionFolder, CompositionScope, Subject } from '@/types'
 import { buildFolderTree } from '@/lib/compositions'
 import {
     buildSubmitOutline,
@@ -126,6 +126,19 @@ const globalSettings = ref({
     source: '' as string,
 })
 
+const batchTagOpen = ref(false)
+function applyImportTags(value: { operation: string; tag_ids: number[] }) {
+    for (const item of importList.value.filter(i => i.selected)) {
+        const ids = new Set(item.tag_ids ?? [])
+        if (value.operation === 'append') value.tag_ids.forEach(id => ids.add(id))
+        if (value.operation === 'remove') value.tag_ids.forEach(id => ids.delete(id))
+        item.tag_ids = value.operation === 'clear' ? [] : value.operation === 'replace' ? [...value.tag_ids] : [...ids]
+    }
+    batchTagOpen.value = false
+    // 草稿标签已改变，下次导入须使用新的幂等键，避免复用旧请求的结果。
+    idempotencyKey.value = null
+}
+
 // 标签精准解析不支持图片识别；切换到该方法时把来源切回文件/文本。
 watch(parseMethod, (method) => {
     if (method === 'structured' && pastedImage.value) {
@@ -148,43 +161,10 @@ const structuredTagWarning = computed(() => {
 // --- Data Fetching ---
 const { $api } = useNuxtApp()
 const { data: subjects } = useAPI<Subject[]>('/subjects')
-const { data: knowledgePoints } = useAPI<KnowledgePoint[]>('/knowledge-points', { query: { limit: -1 } })
 
 // Default the import subject to the global subject context (still overridable below).
 const { currentSubjectId } = useSubjectContext()
 globalSettings.value.subject_id = currentSubjectId.value ?? undefined
-
-// Non-blocking import-readiness checks: (1) embedding configured, (2) this subject's KPs vectorized.
-const { user } = useAuth()
-const isSuperuser = computed(() => !!user.value?.is_superuser)
-const embeddingConfigured = ref(true)
-const kpVectorized = ref(true)
-const chromaReachable = ref(true)
-
-const fetchImportStatus = async () => {
-    try {
-        const res = await $api<{ embedding_configured: boolean; chroma_reachable: boolean; kp_total: number; kp_vectorized: boolean }>(
-            '/knowledge-points/embedding-status',
-            { query: { subject_id: globalSettings.value.subject_id } }
-        )
-        embeddingConfigured.value = res.embedding_configured
-        chromaReachable.value = res.chroma_reachable
-        kpVectorized.value = res.kp_vectorized
-    } catch {
-        embeddingConfigured.value = true
-        chromaReachable.value = true
-        kpVectorized.value = true
-    }
-}
-onMounted(fetchImportStatus)
-watch(() => globalSettings.value.subject_id, fetchImportStatus)
-
-// Filter knowledge points based on selected subject
-const filteredKnowledgePoints = computed(() => {
-    if (!knowledgePoints.value) return []
-    if (!globalSettings.value.subject_id) return []
-    return knowledgePoints.value.filter(c => c.subject_id === globalSettings.value.subject_id)
-})
 
 // --- Handlers ---
 
@@ -249,10 +229,6 @@ const handleAutoUpload = () => {
         toast.error('请先选择所属学科')
         return
     }
-    if (parseMethod.value === 'ai' && embeddingConfigured.value && !chromaReachable.value) {
-        if (!confirm('知识点向量库暂时不可达，是否跳过知识点自动匹配继续导入？')) return
-    }
-
     // Auto-detect based on file type or pasted image
     if (pastedImage.value || (file.value && file.value.type.startsWith('image/'))) {
         handleUploadImage();
@@ -528,6 +504,7 @@ const handleEditSuccess = (updatedQuestion: ImportDraft) => {
         const index = importList.value.findIndex(i => i.uid === editingItemId.value)
         if (index !== -1) {
             importList.value[index] = updatedQuestion
+            idempotencyKey.value = null
         }
     }
     editingItemId.value = null
@@ -587,27 +564,6 @@ const reset = () => {
         <!-- Step 1: Upload -->
         <div v-if="step === 'upload'" class="w-full">
             <div class="space-y-6">
-                <Alert v-if="!embeddingConfigured" class="max-w-4xl mx-auto">
-                    <AlertCircle class="h-4 w-4" />
-                    <AlertDescription>
-                        未配置 Embedding 模型，导入时不会自动匹配知识点。可前往
-                        <NuxtLink to="/settings" class="underline font-medium">系统设置</NuxtLink>
-                        配置后再导入。
-                    </AlertDescription>
-                </Alert>
-                <Alert v-else-if="!kpVectorized" class="max-w-4xl mx-auto">
-                    <AlertCircle class="h-4 w-4" />
-                    <AlertDescription>
-                        <template v-if="isSuperuser">
-                            当前学科的知识点尚未建立向量索引，导入时不会自动匹配。可前往
-                            <NuxtLink to="/knowledge-points" class="underline font-medium">知识点管理</NuxtLink>
-                            重建索引。
-                        </template>
-                        <template v-else>
-                            当前学科的知识点尚未建立向量索引，导入时不会自动匹配，请联系管理员重建索引。
-                        </template>
-                    </AlertDescription>
-                </Alert>
                 <!-- Input Source Tabs -->
                 <Tabs v-model="activeTab" class="w-full max-w-4xl mx-auto">
                     <TabsList class="grid w-full grid-cols-2">
@@ -861,6 +817,12 @@ const reset = () => {
                 </AlertDescription>
             </Alert>
 
+            <div class="flex items-center gap-3">
+                <span class="text-sm">已选 {{ selectedCount }} 道</span>
+                <Button variant="outline" :disabled="!selectedCount" @click="batchTagOpen = true">批量维护标签</Button>
+                <Button variant="ghost" @click="importList.forEach(item => item.selected = true)">全选</Button>
+                <Button variant="ghost" @click="importList.forEach(item => item.selected = false)">取消全选</Button>
+            </div>
             <!-- Question List -->
             <div class="space-y-4 pb-4">
                 <div v-if="importList.length === 0" class="text-center py-8 text-muted-foreground">
@@ -871,8 +833,10 @@ const reset = () => {
                     v-for="{ item, index } in visibleImportList"
                     :key="item.uid"
                     :item="item"
+                    :selectable="true"
+                    :selected="item.selected"
+                    @select="item.selected = $event"
                     :index="index"
-                    :all-knowledge-points="knowledgePoints"
                     @edit="editItem(item.uid)"
                     @delete="removeItem(index)"
                     @duplicate="duplicateItem(index)"
@@ -881,7 +845,6 @@ const reset = () => {
                 <QuestionEditDialog
                     :open="!!editingItemId"
                     :question="getEditingItem()"
-                    :knowledge-points="knowledgePoints"
                     :subjects="subjects"
                     :auto-fill-subject-id="globalSettings.subject_id"
                     mode="import"
@@ -1061,4 +1024,5 @@ const reset = () => {
 
         <StructuredTemplateGuideDialog :open="showFormatGuide" @update:open="(v) => showFormatGuide = v" />
     </div>
+    <BatchTagsDialog v-model:open="batchTagOpen" :subject-id="globalSettings.subject_id" :count="selectedCount" @submit="applyImportTags" />
 </template>

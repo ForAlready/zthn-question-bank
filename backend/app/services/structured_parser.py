@@ -16,6 +16,7 @@ import re
 import uuid
 from collections import defaultdict
 from typing import List, Dict, Optional, Tuple
+from app.services.question_type_names import coerce_q_type
 
 from app.services.importing.contracts import (
     OUTLINE_HEADING,
@@ -45,6 +46,7 @@ TAG_ALIASES = {
     "难度": "difficulty", "difficulty": "difficulty",
     # knowledge point (consumed but not emitted in MVP)
     "知识点": "knowledge_point", "knowledge_point": "knowledge_point",
+    "标签": "tags", "tags": "tags",
 }
 
 # 文档级分区标签(与上面的逐题字段标签分属不同命名空间,只在题块之外生效):
@@ -53,17 +55,6 @@ TAG_ALIASES = {
 SECTION_TAG_ALIASES = {
     "答案区": "answer_section", "答案表": "answer_section",
     "统一答案": "answer_section", "答案速查": "answer_section",
-}
-
-_Q_TYPE_MAP = {
-    "单选": "single_choice", "单选题": "single_choice", "single_choice": "single_choice",
-    "多选": "multiple_choice", "多选题": "multiple_choice", "multiple_choice": "multiple_choice",
-    "判断": "true_false", "判断题": "true_false", "true_false": "true_false",
-    "填空": "fill_in_the_blank", "填空题": "fill_in_the_blank",
-    "fill_in_the_blank": "fill_in_the_blank",
-    "解答": "free_response", "解答题": "free_response",
-    "简答": "free_response", "简答题": "free_response",
-    "主观": "free_response", "主观题": "free_response", "free_response": "free_response",
 }
 
 _CN_DIFFICULTY = {"简单": 1, "容易": 1, "较易": 2, "中等": 3, "普通": 3, "较难": 4, "困难": 5, "难": 5}
@@ -182,12 +173,17 @@ def _map_q_type(raw: str) -> Optional[str]:
     if not raw:
         return None
     key = raw.splitlines()[0].strip()
-    return _Q_TYPE_MAP.get(key) or _Q_TYPE_MAP.get(key.lower())
+    try:
+        return coerce_q_type(key).value
+    except ValueError:
+        return None
 
 
-def _infer_q_type(options: List[str], answer: str, content: str) -> str:
+def _infer_q_type(options: List[str], answer: str, content: str) -> Optional[str]:
     a = (answer or "").strip()
     if options:
+        if not re.fullmatch(r'[A-Za-z\s,，、;；]+', a):
+            return None
         letters = re.findall(r'[A-Za-z]', a)
         if len(letters) >= 2:
             return "multiple_choice"
@@ -196,7 +192,7 @@ def _infer_q_type(options: List[str], answer: str, content: str) -> str:
         return "true_false"
     if _BLANK_UNDERSCORE_RE.search(content) or "（）" in content or "（  ）" in content:
         return "fill_in_the_blank"
-    return "free_response"
+    return "free_response" if a else None
 
 
 def _is_table_row(line: str) -> bool:
@@ -373,12 +369,14 @@ def _build_question(fields: Dict[str, List[str]],
     question = {
         "content": content,
         "q_type": None,
+        "raw_type_name": q_type_raw,
         "options": options,
         "answer": answer,
         "thinking": thinking,
         "analysis": analysis,
         "summary": summary,
         "difficulty": difficulty,
+        "tags": list(dict.fromkeys(t.strip() for t in re.split(r'[,，、;；\n]', join("tags")) if t.strip())),
         "warnings": [],
         "source_number": source_number,
         # 文末答案区回填 answer 后需要重新推断 q_type，故显式标签的结果先记下，
@@ -395,6 +393,8 @@ def _finalize_question(question: dict) -> None:
     options = question["options"]
     answer = question["answer"]
     q_type = question.get("_q_type_explicit") or _infer_q_type(options, answer, content)
+    if question.get("raw_type_name") and not _map_q_type(question["raw_type_name"]):
+        q_type = None
 
     if q_type == "fill_in_the_blank" and answer:
         try:
@@ -405,6 +405,7 @@ def _finalize_question(question: dict) -> None:
             answer = json.dumps([[answer]], ensure_ascii=False)
 
     warnings: List[str] = []
+    if q_type is None: warnings.append("无法确定题型，请复核选择")
     if not content:
         warnings.append("题干为空")
     if q_type in ("single_choice", "multiple_choice"):

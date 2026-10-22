@@ -1,6 +1,7 @@
 """Phase 1 单测:统一归一化出口 QuestionImporter(worker / batch-legacy 共用)。"""
 
 import json
+import pytest
 
 from sqlalchemy import select
 
@@ -20,7 +21,8 @@ def test_coerce_q_type_from_legacy_strings():
     assert coerce_q_type("multiple_choice") == QuestionType.MULTIPLE_CHOICE
     assert coerce_q_type("填空题") == QuestionType.FILL_IN_THE_BLANK
     assert coerce_q_type("解答") == QuestionType.FREE_RESPONSE
-    assert coerce_q_type(None) == QuestionType.SINGLE_CHOICE
+    with pytest.raises(ValueError):
+        coerce_q_type(None)
     # 已是枚举则原样返回。
     assert coerce_q_type(QuestionType.TRUE_FALSE) == QuestionType.TRUE_FALSE
 

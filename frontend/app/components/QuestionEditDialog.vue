@@ -88,7 +88,7 @@ const isImportMode = computed(() => props.mode === 'import')
 // 所有模式统一走 v2 RichDoc 草稿；import 模式只是不落库，保存时把草稿回抛给评审列表。
 const draft = ref<QuestionDraft | null>(null)
 // import 模式下随草稿一起回抛的列表态（列表 key / 选中 / 警告 / AI 建议标签）。
-const importMeta = ref<Pick<ImportDraft, 'uid' | 'selected' | 'warnings' | 'ai_suggested_tags'> | null>(null)
+const importMeta = ref<Pick<ImportDraft, 'uid' | 'selected' | 'warnings' | 'ai_suggested_tags' | 'raw_type_name' | 'raw_answer'> | null>(null)
 
 const isSubmitting = ref(false)
 const openTagSelect = ref(false)
@@ -128,10 +128,10 @@ const availableKnowledgePoints = computed(() => {
 })
 
 // --- shared field accessors (draft is the single edit state for all modes) ---
-const qType = computed<QuestionType>({
-  get: () => draft.value?.q_type ?? 'single_choice',
+const qType = computed<QuestionType | undefined>({
+  get: () => draft.value?.q_type ?? undefined,
   set: (v) => {
-    if (draft.value) switchDraftType(draft.value, v)
+    if (draft.value && v) switchDraftType(draft.value, v)
   },
 })
 
@@ -160,6 +160,7 @@ const parentId = computed<number | undefined>({
 function switchDraftType(d: QuestionDraft, newType: QuestionType) {
   const oldType = d.q_type
   if (oldType === newType) return
+  if (d.answer && !window.confirm('更改题型需要重新填写答案，是否继续？')) return
   d.q_type = newType
   if (isChoiceType(newType) && d.options.length === 0) {
     d.options = createDefaultOptions()
@@ -178,6 +179,8 @@ const initState = () => {
       uid: item.uid,
       selected: item.selected,
       warnings: item.warnings,
+      raw_type_name: item.raw_type_name,
+      raw_answer: item.raw_answer,
       ai_suggested_tags: item.ai_suggested_tags,
     }
     draft.value = item
@@ -222,6 +225,7 @@ const draftRemoveOption = (index: number) => {
 // 导入评审保存不做硬校验：最终「确认导入」时再统一校验/降级，允许中途保存不完整草稿。
 const handleSaveImport = () => {
   if (!draft.value || !importMeta.value) return
+  if (!draft.value.q_type) { toast.error("请选择题型"); return }
   emit('save', { ...(draft.value as ImportDraft), ...importMeta.value })
   emit('update:open', false)
 }
@@ -311,7 +315,7 @@ const toggleTag = (tagId: number) => {
                 <!-- Type & Difficulty (+ db-only status/parent) -->
                 <div class="grid grid-cols-2 gap-4">
                   <div class="space-y-2">
-                    <Label>题目类型</Label>
+                    <Label>题型</Label>
                     <Select v-model="qType">
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -319,9 +323,12 @@ const toggleTag = (tagId: number) => {
                         <SelectItem value="multiple_choice">多选题</SelectItem>
                         <SelectItem value="true_false">判断题</SelectItem>
                         <SelectItem value="fill_in_the_blank">填空题</SelectItem>
-                        <SelectItem value="free_response">解答题</SelectItem>
+                        <SelectItem value="free_response">问答题</SelectItem>
                       </SelectContent>
                     </Select>
+                    <p class="text-xs text-muted-foreground">简答、论述、案例分析统一使用问答题。</p>
+                    <p v-if="isImportMode && importMeta?.raw_type_name" class="text-xs text-muted-foreground">原题型：{{ importMeta.raw_type_name }}</p>
+                    <p v-if="isImportMode && importMeta?.raw_answer" class="text-xs text-amber-700">原答案（请复核填写）：{{ importMeta.raw_answer }}</p>
                   </div>
                   <div v-if="!isImportMode && draft" class="space-y-2">
                     <Label>状态</Label>
@@ -473,7 +480,7 @@ const toggleTag = (tagId: number) => {
 
                   <AnswerEditor
                     v-model="draft.answer"
-                    :q-type="draft.q_type"
+                    :q-type="draft.q_type || 'single_choice'"
                     :options="draft.options"
                     :stem="draft.content"
                   />

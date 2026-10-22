@@ -17,9 +17,11 @@ from app.models.question import QuestionStatus
 from app.services.question_legacy_adapter import (
     LegacyQuestionError,
     adapt_legacy_question,
+    normalize_legacy_options,
 )
 
-from .normalize import coerce_kp_ids, coerce_q_type
+from .normalize import coerce_kp_ids
+from app.services.question_type_names import resolve_import_q_type
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +77,23 @@ def extracted_to_v2_review(
     """
     out: list[dict[str, Any]] = []
     for index, raw in enumerate(raws):
-        q_type = coerce_q_type(raw.get("q_type", raw.get("type")))
+        try:
+            q_type = resolve_import_q_type(raw)
+        except ValueError:
+            # Keep an editable draft without manufacturing a fixed answer type.
+            from app.services.question_content_converter import markdown_to_rich_doc
+            out.append({"q_type":None,"content":markdown_to_rich_doc(_clean_content(raw.get("content"))),
+                        "options":normalize_legacy_options(raw.get("options")),"answer":None,"status":"draft","subject_id":raw.get("subject_id") or subject_id,
+                        "difficulty":raw.get("difficulty",1) or 1,"raw_type_name":raw.get("raw_type_name") or str(raw.get("q_type",raw.get("type",""))),
+                        "raw_answer":raw.get("answer"),"suggested_tags":raw.get("tags") or [],
+                        "ai_suggested_tags":_build_ai_tags(raw),
+                        "tag_ids":raw.get("tag_ids") or [],"knowledge_point_ids":[],
+                        "warnings":["无法确定题型，请复核选择"],"temp_id":raw.get("id"),
+                        "parent_temp_id":raw.get("parent_id"),"source_number":_source_number(raw)})
+            continue
         content = _clean_content(raw.get("content"))
         warnings: list[str] = list(raw.get("warnings") or []) if isinstance(raw.get("warnings"), list) else []
+        warnings = [w for w in warnings if w != "无法确定题型，请复核选择"]
 
         try:
             v2 = adapt_legacy_question(
@@ -110,9 +126,13 @@ def extracted_to_v2_review(
         out.append(
             {
                 "q_type": q_type.value,
+                "raw_type_name": raw.get("raw_type_name") or str(raw.get("q_type") or ""),
+                "tag_ids": raw.get("tag_ids") or [],
+                "suggested_tags": raw.get("tags") or [],
                 "content": v2["content"],
                 "options": v2["options"],
                 "answer": v2["answer"],
+                "raw_answer": raw.get("answer") if v2["answer"] is None else None,
                 "thinking": v2["thinking"],
                 "analysis": v2["analysis"],
                 "summary": v2["summary"],

@@ -20,25 +20,11 @@ from app.services.question_legacy_adapter import (
     adapt_legacy_question,
 )
 from app.services.question_service import question_service
+from app.services.question_type_names import coerce_q_type, resolve_import_q_type
 
 from .contracts import FailedItem, ImportDefaults, NormalizeReport
 
 logger = logging.getLogger(__name__)
-
-
-def coerce_q_type(raw: Any) -> QuestionType:
-    if isinstance(raw, QuestionType):
-        return raw
-    s = str(raw or "single_choice").lower()
-    if "multiple" in s:
-        return QuestionType.MULTIPLE_CHOICE
-    if "true" in s or "false" in s:
-        return QuestionType.TRUE_FALSE
-    if "fill" in s or "blank" in s or "填空" in s:
-        return QuestionType.FILL_IN_THE_BLANK
-    if "free" in s or "response" in s or "essay" in s or "解答" in s or "short" in s:
-        return QuestionType.FREE_RESPONSE
-    return QuestionType.SINGLE_CHOICE
 
 
 def _coerce_status(raw: Any, default: QuestionStatus) -> QuestionStatus:
@@ -88,7 +74,11 @@ class QuestionImporter:
         report = NormalizeReport()
 
         for index, raw in enumerate(raws):
-            q_type = coerce_q_type(raw.get("q_type", raw.get("type")))
+            try:
+                q_type = resolve_import_q_type(raw)
+            except ValueError as exc:
+                report.failed.append(FailedItem(index=index,message=str(exc)))
+                continue
             status = _coerce_status(raw.get("status"), defaults.status)
 
             try:

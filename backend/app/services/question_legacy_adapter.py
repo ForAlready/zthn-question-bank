@@ -24,7 +24,7 @@ from app.services.question_content_converter import (
     markdown_to_rich_doc,
 )
 
-__all__ = ["LegacyQuestionError", "adapt_legacy_question"]
+__all__ = ["LegacyQuestionError", "adapt_legacy_question", "normalize_legacy_options"]
 
 _CHOICE_TYPES = {"single_choice", "multiple_choice"}
 # 旧选项字符串的行首 label,如 "A. xxx" / "A、xxx" / "A) xxx" / "A：xxx"。
@@ -43,7 +43,7 @@ def _q_type_value(q_type: Any) -> str:
     return getattr(q_type, "value", q_type)
 
 
-def _normalize_legacy_options(raw_options: Any) -> list[dict[str, Any]]:
+def normalize_legacy_options(raw_options: Any) -> list[dict[str, Any]]:
     """把旧 options 归一为 [{id, label, content: RichDoc}],label 缺失时按序补 A/B/C…。"""
     if not isinstance(raw_options, list):
         return []
@@ -103,7 +103,7 @@ def adapt_legacy_question(
 
     v2_options = None
     if qt in _CHOICE_TYPES:
-        v2_options = _normalize_legacy_options(options) or None
+        v2_options = normalize_legacy_options(options) or None
 
     answer_spec: Optional[dict[str, Any]] = None
     answer_present = answer is not None and (

@@ -36,7 +36,9 @@ def test_pandoc_blockquote_options_are_not_appended_to_content():
     q = parse_structured(text).questions[0]
 
     assert q["content"] == "集合题（ ）"
-    assert q["q_type"] == "single_choice"
+    # 没有题型或答案时，不能从选项推断单选／多选，交人工复核。
+    assert q["q_type"] is None
+    assert "无法确定题型，请复核选择" in q["warnings"]
     assert q["options"] == ["A. 12", "B. 11", "C. 8", "D. 6"]
 
 
