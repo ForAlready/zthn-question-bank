@@ -14,6 +14,7 @@ from typing import Any, List, Optional
 
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app import crud, models, schemas
 from app.core import permissions
@@ -23,6 +24,8 @@ from app.models.import_task import ImportTask, ImportTaskStatus
 from app.models.question import Question, QuestionStatus
 from app.services.activity_logger import log_activity
 from app.services.question_service import question_service
+from app.services.tag_assignment import resolve_tags
+from app.schemas.question import QuestionBatchTags
 
 from .base import Authz, Capability, Scope
 from .context import ExecutionContext
@@ -50,6 +53,49 @@ class QuestionIdInput(BaseModel):
     id: int
 
 
+@register
+class BatchTags(Capability[QuestionBatchTags, dict]):
+    name = "question.batch_tags"
+    description = "批量追加、移除、替换或清空题目标签。"
+    input_model = QuestionBatchTags
+    authz = Authz.CUSTOM
+    scope = Scope.SUBJECT
+    mutating = True
+
+    async def execute(self, ctx, inp, target):
+        rows = (await ctx.db.execute(select(Question).options(selectinload(Question.tags))
+                .where(Question.id.in_(inp.ids), Question.deleted_at.is_(None)).with_for_update())).scalars().all()
+        by_id = {q.id:q for q in rows}
+        plans = []
+        for qid in dict.fromkeys(inp.ids):
+            q = by_id.get(qid)
+            if not q or not is_question_visible(q,ctx.actor):
+                raise NotFound("题目不存在或不可见；本批未更新")
+            if not permissions.can(ctx.actor,Permission.EDIT_QUESTION,subject_id=q.subject_id):
+                raise Forbidden("无题目编辑权限；本批未更新")
+            before={t.id for t in q.tags}
+            requested=set(inp.tag_ids)
+            try:
+                await resolve_tags(ctx.db,requested,subject_id=q.subject_id,existing_ids=before,
+                                   allow_disabled=inp.operation=="remove")
+                desired=(before|requested if inp.operation=="append" else before-requested if inp.operation=="remove"
+                         else requested if inp.operation=="replace" else set())
+                tags=await resolve_tags(ctx.db,desired,subject_id=q.subject_id,existing_ids=before)
+            except ValueError as exc:
+                raise Invalid(str(exc)) from exc
+            plans.append((q,tags,before))
+        changed=0
+        for q,tags,before in plans:
+            if before=={t.id for t in tags}: continue
+            q.tags=tags
+            q.updated_by=ctx.actor.id
+            await log_activity(ctx.db,ctx.actor.id,action="update",resource_type="question",resource_id=q.id,
+                               details={"operation":inp.operation,"tag_ids":sorted(t.id for t in tags)})
+            changed+=1
+        await ctx.db.commit()
+        return {"requested":len(plans),"updated":changed,"unchanged":len(plans)-changed}
+
+
 class QuestionUpdateInput(BaseModel):
     id: int
     data: schemas.QuestionUpdate
@@ -75,7 +121,10 @@ class CreateQuestion(Capability[schemas.QuestionCreate, Question]):
 
     async def execute(self, ctx: ExecutionContext, inp: schemas.QuestionCreate, target: Any) -> Question:
         inp.subject_id = self.subject_for(ctx, inp, target)
-        return await crud.question.create_with_tags(db=ctx.db, obj_in=inp, user_id=ctx.actor.id)
+        try:
+            return await crud.question.create_with_tags(db=ctx.db, obj_in=inp, user_id=ctx.actor.id)
+        except ValueError as exc:
+            raise Invalid(str(exc)) from exc
 
 
 @register
@@ -145,9 +194,12 @@ class UpdateQuestion(Capability[QuestionUpdateInput, Question]):
         return await _load_visible_question(ctx, inp.id)
 
     async def execute(self, ctx: ExecutionContext, inp: QuestionUpdateInput, target: Question) -> Question:
-        return await crud.question.update_with_tags(
-            db=ctx.db, db_obj=target, obj_in=inp.data, user_id=ctx.actor.id
-        )
+        try:
+            return await crud.question.update_with_tags(
+                db=ctx.db, db_obj=target, obj_in=inp.data, user_id=ctx.actor.id
+            )
+        except ValueError as exc:
+            raise Invalid(str(exc)) from exc
 
 
 @register

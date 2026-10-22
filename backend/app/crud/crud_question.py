@@ -20,6 +20,8 @@ from app.services.question_content import (
 from app.models.knowledge_point import KnowledgePoint
 from app.models.import_task import ImportTask
 from app.models.activity_log import ActivityLog
+from app.schemas.tag_filter import TagFilter
+from app.services.tag_assignment import resolve_tags
 
 
 def visible_questions_filter(viewer):
@@ -96,7 +98,6 @@ class CRUDQuestion(CRUDBase[Question, QuestionCreate, QuestionUpdate]):
             l2.selectinload(Question.review_logs),
 
             # Level 3 Structure (deepest level loaded)
-            l3
         ).filter(self.model.id == id, self.model.deleted_at.is_(None))
         result = await db.execute(stmt)
         return result.scalars().first()
@@ -108,6 +109,7 @@ class CRUDQuestion(CRUDBase[Question, QuestionCreate, QuestionUpdate]):
         subject_id: Optional[int] = None,
         knowledge_point_ids: Optional[List[int]] = None,
         tag_ids: Optional[List[int]] = None,
+        tag_match: str = "any",
         q_type: Optional[str] = None,
         difficulty: Optional[int] = None,
         status: Optional[str] = None,
@@ -155,7 +157,6 @@ class CRUDQuestion(CRUDBase[Question, QuestionCreate, QuestionUpdate]):
             l2.selectinload(Question.updater),
 
             # Level 3 Structure (deepest level loaded)
-            l3
         ).filter(self.model.deleted_at.is_(None))
         
         if id:
@@ -181,8 +182,16 @@ class CRUDQuestion(CRUDBase[Question, QuestionCreate, QuestionUpdate]):
                 query = query.filter(self.model.id == -1)
             
         if tag_ids:
-            query = query.filter(self.model.tags.any(Tag.id.in_(tag_ids)))
-            
+            condition = TagFilter(tag_ids=tag_ids, match=tag_match)
+            tags = (await db.execute(select(Tag).where(Tag.id.in_(condition.tag_ids)))).scalars().all()
+            if len(tags) != len(condition.tag_ids) or (subject_id and any(t.subject_id != subject_id for t in tags)):
+                raise ValueError("标签不存在或不可用于当前学科")
+            if condition.match == "all":
+                for tid in condition.tag_ids:
+                    query = query.filter(self.model.tags.any(Tag.id == tid))
+            else:
+                query = query.filter(self.model.tags.any(Tag.id.in_(condition.tag_ids)))
+
         if q_type:
             query = query.filter(self.model.q_type == q_type)
             
@@ -235,6 +244,7 @@ class CRUDQuestion(CRUDBase[Question, QuestionCreate, QuestionUpdate]):
         subject_id: Optional[int] = None,
         knowledge_point_ids: Optional[List[int]] = None,
         tag_ids: Optional[List[int]] = None,
+        tag_match: str = "any",
         q_type: Optional[str] = None,
         difficulty: Optional[int] = None,
         status: Optional[str] = None,
@@ -255,6 +265,7 @@ class CRUDQuestion(CRUDBase[Question, QuestionCreate, QuestionUpdate]):
             subject_id=subject_id,
             knowledge_point_ids=knowledge_point_ids,
             tag_ids=tag_ids,
+            tag_match=tag_match,
             q_type=q_type,
             difficulty=difficulty,
             status=status,
@@ -289,6 +300,7 @@ class CRUDQuestion(CRUDBase[Question, QuestionCreate, QuestionUpdate]):
         subject_id: Optional[int] = None,
         knowledge_point_ids: Optional[List[int]] = None,
         tag_ids: Optional[List[int]] = None,
+        tag_match: str = "any",
         q_type: Optional[str] = None,
         difficulty: Optional[int] = None,
         status: Optional[str] = None,
@@ -309,6 +321,7 @@ class CRUDQuestion(CRUDBase[Question, QuestionCreate, QuestionUpdate]):
             subject_id=subject_id,
             knowledge_point_ids=knowledge_point_ids,
             tag_ids=tag_ids,
+            tag_match=tag_match,
             q_type=q_type,
             difficulty=difficulty,
             status=status,
@@ -331,6 +344,7 @@ class CRUDQuestion(CRUDBase[Question, QuestionCreate, QuestionUpdate]):
         return result.scalar_one()
 
     async def create_with_tags(self, db: AsyncSession, *, obj_in: QuestionCreate, user_id: Optional[int] = None, import_task_id: Optional[int] = None) -> Question:
+
         obj_in_data = obj_in.model_dump()
         tag_ids = obj_in_data.pop("tag_ids", [])
         knowledge_point_ids = obj_in_data.pop("knowledge_point_ids", [])
@@ -357,16 +371,12 @@ class CRUDQuestion(CRUDBase[Question, QuestionCreate, QuestionUpdate]):
         if import_task_id:
             db_obj.import_task_id = import_task_id
         
-        if tag_ids:
-            result = await db.execute(select(Tag).filter(Tag.id.in_(tag_ids)))
-            tags = result.scalars().all()
-            db_obj.tags = list(tags)
-            
+        db_obj.tags = await resolve_tags(db, tag_ids, subject_id=db_obj.subject_id)
         if knowledge_point_ids:
             result = await db.execute(select(KnowledgePoint).filter(KnowledgePoint.id.in_(knowledge_point_ids)))
             kps = result.scalars().all()
             db_obj.knowledge_points = list(kps)
-            
+
         db.add(db_obj)
         await db.commit()
         await db.refresh(db_obj)
@@ -408,6 +418,25 @@ class CRUDQuestion(CRUDBase[Question, QuestionCreate, QuestionUpdate]):
             
         tag_ids = update_data.pop("tag_ids", None)
         knowledge_point_ids = update_data.pop("knowledge_point_ids", None)
+        target_subject = update_data.get("subject_id", db_obj.subject_id)
+        existing_tags = {t.id for t in db_obj.tags}
+        validated_tags = await resolve_tags(db, tag_ids if tag_ids is not None else existing_tags,
+                                          subject_id=target_subject, existing_ids=existing_tags)
+        if not (set(update_data) & {"content", "options", "answer", "q_type", "status",
+                                   "thinking", "analysis", "summary"}):
+            for field in ("difficulty", "source", "subject_id", "parent_id", "visibility"):
+                if field in update_data:
+                    setattr(db_obj, field, update_data[field])
+            if tag_ids is not None:
+                db_obj.tags = validated_tags
+            if knowledge_point_ids is not None:
+                db_obj.knowledge_points = list((await db.execute(select(KnowledgePoint).where(KnowledgePoint.id.in_(knowledge_point_ids)))).scalars())
+            if user_id:
+                db_obj.updated_by = user_id
+                await log_activity(db,user_id,action="update",resource_type="question",resource_id=db_obj.id,
+                                   details={"tag_ids":sorted(t.id for t in validated_tags)})
+            await db.commit()
+            return await self.get(db,id=db_obj.id)
 
         # Merge v2 content state (current DB row + overlay), then run full domain validation
         # before persisting. This is the authoritative net for partial updates.
@@ -473,7 +502,7 @@ class CRUDQuestion(CRUDBase[Question, QuestionCreate, QuestionUpdate]):
         for field in ("thinking", "analysis", "summary"):
             if field in update_data:
                 setattr(db_obj, field, to_db_json(update_data[field]))
-        for field in ("status", "difficulty", "source", "subject_id", "parent_id"):
+        for field in ("status", "difficulty", "source", "subject_id", "parent_id", "visibility"):
             if field in update_data:
                 setattr(db_obj, field, update_data[field])
 
@@ -484,14 +513,12 @@ class CRUDQuestion(CRUDBase[Question, QuestionCreate, QuestionUpdate]):
             db_obj.updated_by = user_id
             
         if tag_ids is not None:
-            result = await db.execute(select(Tag).filter(Tag.id.in_(tag_ids)))
-            tags = result.scalars().all()
-            db_obj.tags = list(tags)
-            
+            db_obj.tags = validated_tags
         if knowledge_point_ids is not None:
             result = await db.execute(select(KnowledgePoint).filter(KnowledgePoint.id.in_(knowledge_point_ids)))
             kps = result.scalars().all()
             db_obj.knowledge_points = list(kps)
+
             
         db.add(db_obj)
         await db.commit()

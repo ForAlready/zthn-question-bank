@@ -81,16 +81,9 @@ async def delete_tag_category(
         raise HTTPException(status_code=404, detail="Tag category not found")
     deps.require(current_user, Permission.MANAGE_SUBJECT, subject_id=tag_category.subject_id)
     
-    # Find all tags in this category
-    result = await db.execute(select(Tag).where(Tag.category_id == id))
-    tags = result.scalars().all()
-    
-    for tag in tags:
-        # Delete associations in question_tags
-        await db.execute(delete(question_tags).where(question_tags.c.tag_id == tag.id))
-        # Delete the tag
-        await db.delete(tag)
-
+    result=await db.execute(select(Tag.id).where(Tag.category_id==id).limit(1))
+    if result.first():
+        raise HTTPException(409,detail={"code":"tag_group_not_empty","message":"请先移动组内标签，再删除空分组"})
     await db.delete(tag_category)
     await db.commit()
     return tag_category

@@ -18,6 +18,8 @@ async def read_tags(
     page: int = 1,
     size: int = 20,
     category_id: Optional[int] = None,
+    enabled: Optional[bool] = None,
+    keyword: Optional[str] = None,
     current_user: models.User = Depends(deps.get_current_active_user),
 ) -> Any:
     """Set size to -1 to retrieve all tags for the subject (used by tag-picker UIs)."""
@@ -25,9 +27,9 @@ async def read_tags(
     limit = None if size == -1 else size
     skip = 0 if limit is None else (page - 1) * size
     tags = await crud.tag.get_multi_by_subject(
-        db, subject_id=subject_id, skip=skip, limit=limit, category_id=category_id
+        db, subject_id=subject_id, skip=skip, limit=limit, category_id=category_id, enabled=enabled, keyword=keyword
     )
-    total = await crud.tag.count_by_subject(db, subject_id=subject_id, category_id=category_id)
+    total = await crud.tag.count_by_subject(db, subject_id=subject_id, category_id=category_id, enabled=enabled, keyword=keyword)
     return {
         "items": tags,
         "total": total,
@@ -51,7 +53,10 @@ async def create_tag(
     if existing:
         raise HTTPException(status_code=400, detail="Tag with this name already exists")
 
-    tag = await crud.tag.create(db=db, obj_in=tag_in, user_id=current_user.id)
+    try:
+        tag = await crud.tag.create(db=db, obj_in=tag_in, user_id=current_user.id)
+    except ValueError as exc:
+        raise HTTPException(400,detail=str(exc)) from exc
     return tag
 
 @router.get("/import-template")
@@ -101,7 +106,10 @@ async def update_tag(
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
     deps.require(current_user, Permission.MANAGE_SUBJECT, subject_id=tag.subject_id)
-    tag = await crud.tag.update(db=db, db_obj=tag, obj_in=tag_in, user_id=current_user.id)
+    try:
+        tag = await crud.tag.update(db=db, db_obj=tag, obj_in=tag_in, user_id=current_user.id)
+    except ValueError as exc:
+        raise HTTPException(400,detail=str(exc)) from exc
     return tag
 
 @router.get("/{id}", response_model=schemas.Tag)
@@ -128,5 +136,20 @@ async def delete_tag(
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
     deps.require(current_user, Permission.MANAGE_SUBJECT, subject_id=tag.subject_id)
-    tag = await crud.tag.remove(db=db, id=id, user_id=current_user.id)
+    refs=await crud.tag.references(db,id)
+    if not refs["can_delete"]:
+        raise HTTPException(409,detail={"code":"tag_in_use","message":"标签仍被题目或模板引用，请停用或移除引用",**refs})
+    try:
+        tag = await crud.tag.remove(db=db, id=id, user_id=current_user.id)
+    except ValueError as exc:
+        raise HTTPException(409,detail=str(exc)) from exc
     return tag
+
+
+@router.get("/{id}/references")
+async def tag_references(id:int, db:deps.SessionDep,
+                         current_user:models.User=Depends(deps.get_current_active_user)):
+    tag=await crud.tag.get(db=db,id=id)
+    if not tag: raise HTTPException(404,detail="标签不存在")
+    deps.require(current_user,Permission.MANAGE_SUBJECT,subject_id=tag.subject_id)
+    return await crud.tag.references(db,id)

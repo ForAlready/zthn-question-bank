@@ -1,5 +1,5 @@
 from typing import Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from app import crud, schemas, models
 from app.api import deps
 from app import capabilities
@@ -13,14 +13,28 @@ from app.services.importing.normalize import question_importer
 router = APIRouter()
 
 
+@router.post("/batch-tags")
+async def batch_tags(
+    body: question_caps.QuestionBatchTags,
+    db: deps.SessionDep,
+    current_user: models.User = Depends(deps.get_current_active_user),
+) -> Any:
+    """原子批量追加、移除、替换或清空题目标签。"""
+    return await capabilities.run(
+        "question.batch_tags", deps.api_context(db, current_user), body
+    )
+
+
 @router.get("", response_model=schemas.QuestionPage)
 async def read_questions(
+    request: Request,
     db: deps.SessionDep,
     page: int = 1,
     size: int = 10,
     subject_id: Optional[int] = None,
     knowledge_point_ids: List[int] = Query(None),
     tag_ids: List[int] = Query(None),
+    tag_match: str = Query("any",pattern="^(any|all)$"),
     q_type: Optional[QuestionType] = None,
     difficulty: Optional[int] = None,
     status: Optional[str] = None,
@@ -36,6 +50,8 @@ async def read_questions(
     root_only: bool = False,
     current_user: models.User = Depends(deps.get_current_active_user),
 ) -> Any:
+    if {"category_ids","question_type_id","uncategorized","category_include_descendants"} & set(request.query_params):
+        raise HTTPException(422,detail="分类与自定义题型字段已废弃")
     skip = (page - 1) * size
     questions = await crud.question.get_multi_with_filters(
         db, 
@@ -44,6 +60,7 @@ async def read_questions(
         subject_id=subject_id,
         knowledge_point_ids=knowledge_point_ids,
         tag_ids=tag_ids,
+        tag_match=tag_match,
         q_type=q_type,
         difficulty=difficulty,
         status=status,
@@ -64,6 +81,7 @@ async def read_questions(
         subject_id=subject_id,
         knowledge_point_ids=knowledge_point_ids,
         tag_ids=tag_ids,
+        tag_match=tag_match,
         q_type=q_type,
         difficulty=difficulty,
         status=status,

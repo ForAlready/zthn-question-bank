@@ -142,6 +142,7 @@ def _reject_legacy(answer: Any) -> None:
 class QuestionCreate(QuestionBase):
     knowledge_point_ids: List[int] = []
     tag_ids: Optional[List[int]] = []
+    # 可配置题型树节点；写入时校验归属与可选状态，答案格式仍由 q_type 独立约束。
     import_task_id: Optional[int] = None
     subject_id: Optional[int] = None
     ai_suggested_tags: Optional[Dict[str, List[str]]] = None
@@ -263,13 +264,23 @@ class QuestionBatchUpdate(BaseModel):
     source: Optional[str] = None
 
 
+class QuestionBatchTags(BaseModel):
+    model_config = {"extra":"forbid"}
+    ids: List[int] = Field(..., min_length=1)
+    operation: Literal["append", "remove", "replace", "clear"]
+    tag_ids: List[int] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def check_ids(self):
+        if any(type(i) is not int or i <= 0 for i in self.ids + self.tag_ids):
+            raise ValueError("ID 必须为正整数")
+        if self.operation == "clear" and self.tag_ids:
+            raise ValueError("清空操作不允许提供标签")
+        return self
+
+
 Question.model_rebuild()
 
-
-# --------------------------------------------------------------------------- #
-# Legacy 导入(智能导入工作台):旧字符串形态 payload,由后端 adapter 转 v2。
-# 严格 QuestionCreate 不接受旧格式;前端不复制 Python 解析规则。
-# --------------------------------------------------------------------------- #
 class LegacyQuestionCreate(BaseModel):
     content: Optional[str] = None
     q_type: QuestionType

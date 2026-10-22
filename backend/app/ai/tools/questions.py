@@ -252,11 +252,11 @@ async def search_questions(ctx: ExecutionContext, args: Dict[str, Any]) -> ToolR
     )
 
 
-async def resolve_tags(db: AsyncSession, tag_names: List[str]) -> List[int]:
+async def resolve_tags(db: AsyncSession, tag_names: List[str], *, subject_id: Optional[int]) -> List[int]:
     """
     Helper to resolve tag names to IDs.
     """
-    if not tag_names:
+    if not tag_names or subject_id is None:
         return []
     
     # Case-insensitive match
@@ -265,7 +265,7 @@ async def resolve_tags(db: AsyncSession, tag_names: List[str]) -> List[int]:
     # but the prompt asks for exact names from get_available_tags.
     
     # Let's try exact match first
-    stmt = select(Tag).where(Tag.name.in_(tag_names))
+    stmt = select(Tag).where(Tag.name.in_(tag_names), Tag.subject_id == subject_id, Tag.enabled.is_(True))
     result = await db.execute(stmt)
     tags = result.scalars().all()
     
@@ -439,7 +439,7 @@ async def _build_question_create(
 ) -> QuestionCreate:
     """模型给的松散字段 → 严格 v2 入参。无法解析答案时抛 LegacyQuestionError。"""
     data = await _enrich_question_with_knowledge_points(ctx.db, data, subject_id=subject_id)
-    tag_ids = await resolve_tags(ctx.db, data.get("tags")) if data.get("tags") else []
+    tag_ids = await resolve_tags(ctx.db, data.get("tags"), subject_id=subject_id) if data.get("tags") else []
 
     v2_fields = adapt_legacy_question(
         q_type=data.get("q_type"),

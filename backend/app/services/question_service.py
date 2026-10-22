@@ -14,7 +14,7 @@ class QuestionService:
         subject_id: Optional[int] = None,
     ) -> List[int]:
         """
-        Process AI suggested tags: find existing or create new tags.
+        Bind only enabled, exact existing names within the current subject.
         Returns a list of tag IDs.
         """
         if not ai_suggested_tags:
@@ -40,13 +40,13 @@ class QuestionService:
                 tag_name = str(tag_name).strip()
                 
                 # Find tag (do not create if missing), scoped to the subject
-                stmt = select(models.Tag).where(models.Tag.name == tag_name)
+                stmt = select(models.Tag).where(models.Tag.name == tag_name, models.Tag.enabled.is_(True))
                 if subject_id is not None:
                     stmt = stmt.where(models.Tag.subject_id == subject_id)
                 result = await db.execute(stmt)
                 tag = result.scalars().first()
                 
-                if tag:
+                if tag and subject_id is not None:
                     tag_ids.append(tag.id)
                 
         return tag_ids

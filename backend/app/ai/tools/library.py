@@ -63,28 +63,20 @@ async def search_knowledge_points(ctx: ExecutionContext, args: Dict[str, Any]) -
 
 
 async def get_available_tags(ctx: ExecutionContext, args: Dict[str, Any]) -> ToolResult:
-    res_cat = await ctx.db.execute(
-        select(TagCategory).where(TagCategory.is_active == True).order_by(TagCategory.sort_order)  # noqa: E712
-    )
-    categories = res_cat.scalars().all()
-
-    res_tag = await ctx.db.execute(select(Tag))
-    tags = res_tag.scalars().all()
-
-    tags_by_cat: Dict[Any, list] = {}
+    from app.core.permissions import can, Permission
+    if ctx.subject_id is None:
+        return ToolResult.text("请先选择当前学科，再查询可用标签。")
+    if not can(ctx.actor, Permission.VIEW_QUESTION, subject_id=ctx.subject_id):
+        return ToolResult.text("无权访问当前学科标签。")
+    categories = (await ctx.db.execute(select(TagCategory).where(TagCategory.subject_id == ctx.subject_id)
+                                      .order_by(TagCategory.sort_order))).scalars().all()
+    tags = (await ctx.db.execute(select(Tag).where(Tag.subject_id == ctx.subject_id, Tag.enabled.is_(True))
+                                .order_by(Tag.id))).scalars().all()
+    groups = {cat.id: cat.name for cat in categories}
+    lines = {}
     for tag in tags:
-        tags_by_cat.setdefault(tag.category_id, []).append(tag.name)
-
-    tag_context_lines = []
-    for cat in categories:
-        cat_tags = tags_by_cat.get(cat.id, [])
-        if cat_tags:
-            tag_context_lines.append(f"- **{cat.name}**: {', '.join(cat_tags)}")
-
-    if not tag_context_lines:
-        return ToolResult.text("No tags available.")
-
-    return ToolResult(content="\n".join(tag_context_lines))
+        lines.setdefault(groups.get(tag.category_id, "未分组"), []).append(f"{tag.name} (ID={tag.id})")
+    return ToolResult.text("\n".join(f"- **{group}**: {', '.join(names)}" for group,names in lines.items()) or "当前学科没有启用标签。")
 
 
 register(ToolSpec(
@@ -96,7 +88,7 @@ register(ToolSpec(
 
 register(ToolSpec(
     name="get_available_tags",
-    description="获取系统中所有可用的标签列表（按分类分组）。当你需要为题目打标签时，请先调用此工具查看有哪些标签可用，然后选择合适的标签名称。",
+    description="获取当前学科启用的扁平标签（分组仅供展示）。当你需要为题目打标签时，请先调用此工具查看有哪些标签可用，然后选择合适的标签名称。",
     parameters=GET_AVAILABLE_TAGS_PARAMS,
     handler=get_available_tags,
 ))

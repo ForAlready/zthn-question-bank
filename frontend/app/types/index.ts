@@ -192,6 +192,7 @@ export interface TagImportResult {
 }
 
 export interface Tag {
+  enabled: boolean
   id: number
   name: string
   category_id: number | null
