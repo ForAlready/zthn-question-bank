@@ -2,7 +2,6 @@
 import { ref, reactive, computed, watch, onActivated } from 'vue'
 import type { Question, KnowledgePoint, TagCategory, Subject, QuestionPage, TagPage, User } from '~/types'
 import { useAPI } from '~/composables/useAPI'
-import KnowledgePointTreeSelector from '~/components/KnowledgePointTreeSelector.vue'
 import QuestionListItem from '~/components/QuestionListItem.vue'
 import QuestionEditDialog from '~/components/QuestionEditDialog.vue'
 import QuestionStructureSheet from '~/components/QuestionStructureSheet.vue'
@@ -10,7 +9,6 @@ import PageHeader from '~/components/PageHeader.vue'
 import CompositionTargetPicker from '~/components/CompositionTargetPicker.vue'
 import QuestionBasketButton from '~/components/QuestionBasketButton.vue'
 import QuestionBasketPanel from '~/components/QuestionBasketPanel.vue'
-import TagFilter from '~/components/TagFilter.vue'
 import { useQuestionBasket } from '~/composables/useQuestionBasket'
 import { richDocToPlainText } from '~/components/rich-editor/richDoc'
 import { Loader2, Plus, X, Trash2, ShoppingBasket, FileText, ListTree, Edit, SlidersHorizontal, ChevronsUpDown, ChevronLeft, ChevronRight } from '@lucide/vue'
@@ -78,8 +76,8 @@ const basketPanelOpen = ref(false)
 // --- Filters ---
 const filters = reactive({
   subject_id: undefined as string | undefined,
-  knowledge_point_ids: [] as string[],
-  tag_ids: [] as string[],
+  tag_ids: [] as number[],
+  tag_match: 'any' as 'any' | 'all',
   q_type: undefined as string | undefined,
   difficulty: undefined as string | undefined,
   status: undefined as string | undefined,
@@ -133,10 +131,28 @@ watch(
   selectedSubjectId,
   (newVal) => {
     filters.subject_id = newVal
+    selectedIds.value.clear()
     page.value = 1
   },
   { immediate: true }
 )
+
+const batchTagOpen = ref(false)
+const batchTagBusy = ref(false)
+async function applyBatchTags(value: { operation: string; tag_ids: number[] }) {
+  batchTagBusy.value = true
+  try {
+    const result = await $api<{ updated: number; unchanged: number; skipped: { id: number; reason: string }[] }>('/questions/batch-tags', {
+      method: 'POST', body: { ids: [...selectedIds.value], ...value },
+    })
+    toast.success(`已更新 ${result.updated} 道，未变化 ${result.unchanged} 道`, {
+    })
+    batchTagOpen.value = false
+    selectedIds.value = new Set()
+    await refreshQuestions()
+  } catch (e) { toast.error('标签更新失败', { description: (e as any)?.data?.detail ?? '请重试' }) }
+  finally { batchTagBusy.value = false }
+}
 
 const queryParams = computed(() => {
   const params: Record<string, any> = {
@@ -146,8 +162,8 @@ const queryParams = computed(() => {
   if (filters.subject_id && filters.subject_id !== '0') params.subject_id = filters.subject_id
   if (filters.id) params.id = filters.id
 
-  if (filters.knowledge_point_ids && filters.knowledge_point_ids.length > 0) params.knowledge_point_ids = filters.knowledge_point_ids
-  if (filters.tag_ids && filters.tag_ids.length > 0) params.tag_ids = filters.tag_ids
+  if (filters.tag_ids.length) params.tag_ids = filters.tag_ids
+  params.tag_match = filters.tag_match
   if (filters.q_type && filters.q_type !== '0') params.q_type = filters.q_type
   if (filters.difficulty && filters.difficulty !== '0') params.difficulty = filters.difficulty
   if (filters.status && filters.status !== '0') params.status = filters.status
@@ -159,7 +175,7 @@ const queryParams = computed(() => {
   if (filters.keyword) params.keyword = filters.keyword
   if (filters.source) params.source = filters.source
   if (filters.root_only) params.root_only = true
-  
+
   return params
 })
 
@@ -242,15 +258,15 @@ const onCompositionPickerAdded = () => {
 const batchDelete = async () => {
   const ids = Array.from(selectedIds.value)
   if (ids.length === 0) return
-  
+
   if (!confirm(`确定要删除选中的 ${ids.length} 道题目吗？此操作不可恢复。`)) return
-  
+
   try {
     const res = await $api<{ deleted_count: number }>('/questions/batch-delete', {
       method: 'POST',
       body: { ids }
     })
-    
+
     toast.success(`已删除 ${res.deleted_count} 道题目`)
     selectedIds.value.clear()
     refreshQuestions()
@@ -273,17 +289,17 @@ const openBatchUpdateSourceDialog = () => {
 const batchUpdateSource = async () => {
   const ids = Array.from(selectedIds.value)
   if (ids.length === 0) return
-  
+
   try {
-    const res = await $api<{ updated_count: number }>('/questions/batch-update', {
+    const res = await $api<{ updated: number }>('/questions/batch-update', {
       method: 'POST',
-      body: { 
+      body: {
         ids,
         source: newSourceValue.value
       }
     })
-    
-    toast.success(`已更新 ${res.updated_count} 道题目的来源`)
+
+    toast.success(`已更新 ${res.updated} 道题目的来源`)
     isSourceDialogOpen.value = false
     selectedIds.value.clear()
     refreshQuestions()
@@ -308,34 +324,6 @@ watch(questions, (newQuestions) => {
   }
 }, { immediate: true })
 
-const { data: knowledgePoints, refresh: refreshKnowledgePoints } = await useAPI<KnowledgePoint[]>('/knowledge-points', {
-  query: { limit: -1 }
-})
-const { data: tagsPage, refresh: refreshTags } = await useAPI<TagPage>('/tags', {
-  query: computed(() => ({
-    subject_id: selectedSubjectId.value && selectedSubjectId.value !== '0' ? selectedSubjectId.value : undefined,
-    size: -1, // 标签选择下拉需要该学科下的全部标签，不分页
-  })),
-  immediate: false,
-  watch: false,
-})
-const tags = computed(() => tagsPage.value?.items)
-const { data: tagCategories, refresh: refreshTagCategories } = await useAPI<TagCategory[]>('/tag-categories', {
-  query: computed(() => ({
-    subject_id: selectedSubjectId.value && selectedSubjectId.value !== '0' ? selectedSubjectId.value : undefined
-  })),
-  immediate: false,
-  watch: false,
-})
-
-// Only fetch tags/categories once a real subject is selected (never send an empty subject_id).
-watch(selectedSubjectId, (newId) => {
-  if (newId && newId !== '0') {
-    refreshTags()
-    refreshTagCategories()
-  }
-}, { immediate: true })
-
 const { data: users } = await useAPI<User[]>('/users', {
   query: computed(() => ({
     subject_id: selectedSubjectId.value && selectedSubjectId.value !== '0' ? selectedSubjectId.value : undefined
@@ -353,11 +341,9 @@ const statusOptions = [
 
 const qTypeOptions = [
   { label: '全部题型', value: '0' },
-  { label: '单选题', value: 'single_choice' },
-  { label: '多选题', value: 'multiple_choice' },
-  { label: '判断题', value: 'true_false' },
-  { label: '填空题', value: 'fill_in_the_blank' },
-  { label: '解答题', value: 'free_response' },
+  { label: '单选题', value: 'single_choice' }, { label: '多选题', value: 'multiple_choice' },
+  { label: '判断题', value: 'true_false' }, { label: '填空题', value: 'fill_in_the_blank' },
+  { label: '问答题', value: 'free_response' },
 ]
 
 const difficultyOptions = [
@@ -423,47 +409,15 @@ const handleEditSuccess = () => {
   refreshQuestions()
 }
 
-// Filter helpers
-const filteredKnowledgePoints = computed(() => {
-  if (!filters.subject_id || filters.subject_id === '0') return knowledgePoints.value
-  return knowledgePoints.value?.filter(c => String(c.subject_id) === filters.subject_id)
-})
-
-// Knowledge point filter now lives in a popover trigger instead of a dedicated sidebar column.
-const kpPopoverOpen = ref(false)
-const selectedKnowledgePointNames = computed(() => {
-  return filters.knowledge_point_ids
-    .map(id => knowledgePoints.value?.find(kp => String(kp.id) === id)?.name)
-    .filter((name): name is string => Boolean(name))
-})
-const knowledgePointFilterLabel = computed(() => {
-  const names = selectedKnowledgePointNames.value
-  if (names.length === 0) return '全部知识点'
-  if (names.length === 1) return names[0]
-  return `已选 ${names.length} 个知识点`
-})
-const toggleKnowledgePoint = (id: string) => {
-  const index = filters.knowledge_point_ids.indexOf(id)
-  if (index >= 0) {
-    filters.knowledge_point_ids.splice(index, 1)
-  } else {
-    filters.knowledge_point_ids.push(id)
-  }
-}
-const clearKnowledgePoints = () => {
-  filters.knowledge_point_ids = []
-}
-
 const resetFilters = () => {
   filters.id = undefined
-  
+
   // If no subject is selected (e.g. coming from ID/Task view), select the first one
   if ((!selectedSubjectId.value || selectedSubjectId.value === '0') && subjects.value && subjects.value.length > 0) {
     selectedSubjectId.value = String(subjects.value[0].id)
   }
 
   filters.subject_id = selectedSubjectId.value
-  filters.knowledge_point_ids = []
   filters.tag_ids = []
   filters.q_type = undefined
   filters.difficulty = undefined
@@ -477,7 +431,7 @@ const resetFilters = () => {
   filters.source = undefined
   filters.root_only = false
   page.value = 1
-  
+
   // Remove query param
   const query = { ...route.query }
   delete query.import_task_id
@@ -506,7 +460,7 @@ const handleQuestionUpdate = (newQuestion: Question) => {
       // Create a new array reference to ensure reactivity
       const newItems = [...questionPage.value.items]
       newItems[index] = newQuestion
-      
+
       // Update the page object with the new items array to trigger reactivity
       questionPage.value = {
         ...questionPage.value,
@@ -538,7 +492,7 @@ const viewStructure = (question: Question) => {
   </PageHeader>
   <div class="flex flex-1 flex-col">
     <div class="@container/main flex flex-1 flex-col px-4 space-y-6 py-6">
-      
+
       <div v-if="filters.import_task_id" class="bg-primary/10 text-primary px-4 py-3 rounded-md flex items-center justify-between">
           <span class="text-sm font-medium">正在查看最新导入的题目任务</span>
           <Button variant="ghost" size="sm" @click="resetFilters" class="h-8 hover:bg-primary/20">
@@ -571,7 +525,7 @@ const viewStructure = (question: Question) => {
                     <ClearableSelect v-model="filters.status" :options="statusOptions" placeholder="全部状态" />
                   </div>
 
-                  <!-- Type Filter -->
+                  <!-- Type Filter：可配置题型树可选节点 -->
                   <div class="space-y-2">
                     <Label class="text-xs font-medium">题型</Label>
                     <ClearableSelect v-model="filters.q_type" :options="qTypeOptions" placeholder="全部题型" />
@@ -587,50 +541,13 @@ const viewStructure = (question: Question) => {
                 <div class="flex flex-wrap items-end gap-4">
                   <!-- Fields group: grows to fill available space, capped so it doesn't stretch unbounded on wide screens -->
                   <div class="flex flex-1 flex-wrap gap-4">
-                  <!-- Knowledge Point Filter: popover replaces the old dedicated sidebar column -->
+                  <!-- Category Filter：按维度多选，同维 OR / 异维 AND -->
                   <div class="space-y-2 flex-1 min-w-[200px] max-w-sm">
-                    <Label class="text-xs font-medium">知识点</Label>
-                    <Popover v-model:open="kpPopoverOpen">
-                      <PopoverTrigger as-child>
-                        <Button variant="outline" role="combobox" :aria-expanded="kpPopoverOpen" class="h-9 w-full justify-between font-normal">
-                          <div class="flex items-center truncate">
-                            <ListTree class="mr-2 h-4 w-4 shrink-0 opacity-50" />
-                            <span class="truncate">{{ knowledgePointFilterLabel }}</span>
-                          </div>
-                          <div class="flex items-center gap-1 shrink-0">
-                            <Badge v-if="selectedKnowledgePointNames.length > 0" variant="secondary" class="px-1.5">
-                              {{ selectedKnowledgePointNames.length }}
-                            </Badge>
-                            <ChevronsUpDown class="h-4 w-4 opacity-50" />
-                          </div>
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent class="w-80 p-2" align="start">
-                        <div class="max-h-96 overflow-y-auto">
-                          <KnowledgePointTreeSelector
-                            :knowledge-points="filteredKnowledgePoints || []"
-                            :selected-ids="filters.knowledge_point_ids"
-                            @toggle="toggleKnowledgePoint"
-                            @clear="clearKnowledgePoints"
-                          />
-                        </div>
-                        <div v-if="selectedKnowledgePointNames.length > 0" class="flex items-center justify-between pt-2 mt-1 border-t px-1">
-                          <span class="text-xs text-muted-foreground">已选 {{ selectedKnowledgePointNames.length }} 个</span>
-                          <Button variant="ghost" size="sm" class="h-auto px-2 py-1 text-xs" @click="clearKnowledgePoints">清除</Button>
-                        </div>
-                      </PopoverContent>
-                    </Popover>
+                    <Label class="text-xs font-medium">标签</Label>
+                    <TagCondition :model-value="{ tag_ids: filters.tag_ids, match: filters.tag_match }" :subject-id="currentSubjectId" @update:model-value="filters.tag_ids = $event.tag_ids; filters.tag_match = $event.match" />
                   </div>
 
-                  <!-- Tag Filter -->
-                  <div class="space-y-2 flex-1 min-w-[240px] max-w-sm">
-                    <Label class="text-xs font-medium">标签</Label>
-                    <TagFilter 
-                      v-model="filters.tag_ids" 
-                      :tags="tags || []" 
-                      :categories="tagCategories || []" 
-                    />
-                  </div>
+
                   </div>
 
                   <!-- Actions group: pinned to the row's trailing edge, visually separate from the filter fields -->
@@ -702,14 +619,14 @@ const viewStructure = (question: Question) => {
               <div class="space-y-4">
                 <div class="flex justify-between items-center sticky top-0 z-10 bg-background/95 backdrop-blur py-2 border-b px-2" v-if="questionsStatus !== 'pending'">
                   <div class="flex items-center space-x-2">
-                    <Checkbox 
-                      id="select-all" 
-                      :model-value="isAllPageSelected" 
-                      @update:model-value="toggleAllPage" 
+                    <Checkbox
+                      id="select-all"
+                      :model-value="isAllPageSelected"
+                      @update:model-value="toggleAllPage"
                     />
                     <Label for="select-all" class="text-sm font-medium cursor-pointer">全选本页</Label>
                     <Button variant="link" size="sm" class="h-auto p-0 text-muted-foreground" @click="invertSelection">反选</Button>
-                    
+
                     <div v-if="selectedIds.size > 0" class="flex items-center gap-2 ml-4 animate-in fade-in slide-in-from-left-5 duration-300">
                       <span class="text-sm text-muted-foreground">已选 {{ selectedIds.size }} 项</span>
                       <Button size="sm" variant="outline" class="h-7 px-2" @click="batchAddToBasket">
@@ -720,6 +637,7 @@ const viewStructure = (question: Question) => {
                         <FileText class="mr-1 h-3 w-3" />
                         直接加入稿件
                       </Button>
+                      <Button size="sm" variant="outline" class="h-7 px-2" @click="batchTagOpen = true">维护标签</Button>
                       <Button size="sm" variant="outline" class="h-7 px-2" @click="openBatchUpdateSourceDialog">
                         <Edit class="mr-1 h-3 w-3" />
                         修改来源
@@ -755,8 +673,8 @@ const viewStructure = (question: Question) => {
                   暂无数据
                 </div>
                 <div v-else class="space-y-4">
-                  <QuestionListItem 
-                    v-for="question in questions" 
+                  <QuestionListItem
+                    v-for="question in questions"
                     :key="question.id"
                     :item="question"
                     mode="library"
@@ -810,19 +728,18 @@ const viewStructure = (question: Question) => {
   <QuestionEditDialog
     :open="isDialogOpen"
     :question="editingQuestion"
-    :knowledge-points="knowledgePoints"
     :subjects="subjects"
     :mode="dialogMode"
     :auto-fill-subject-id="currentSubjectId ?? undefined"
     @update:open="(v) => isDialogOpen = v"
     @success="handleEditSuccess"
   />
-  
+
   <QuestionStructureSheet
     v-model:open="structureSheetOpen"
     :question-id="structureQuestionId"
   />
-  
+
   <Dialog :open="isSourceDialogOpen" @update:open="(v) => isSourceDialogOpen = v">
     <DialogContent class="sm:max-w-[425px]">
       <DialogHeader>
@@ -859,4 +776,5 @@ const viewStructure = (question: Question) => {
 
   <QuestionBasketButton @click="basketPanelOpen = true" />
   <QuestionBasketPanel v-model:open="basketPanelOpen" :subjects="subjects" />
+  <BatchTagsDialog v-model:open="batchTagOpen" :subject-id="currentSubjectId" :count="selectedIds.size" :busy="batchTagBusy" @submit="applyBatchTags" />
 </template>

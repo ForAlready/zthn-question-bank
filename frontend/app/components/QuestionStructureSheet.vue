@@ -61,20 +61,20 @@ const isOpen = computed({
       <SheetHeader>
         <SheetTitle>题目结构图谱</SheetTitle>
         <SheetDescription>
-          查看题目拆解关系及涉及的知识点
+          查看题目拆解关系及所属标签
         </SheetDescription>
       </SheetHeader>
-      
+
       <div v-if="loading" class="py-8 text-center text-muted-foreground">
         加载中...
       </div>
-      
+
       <div v-else-if="question" class="mt-6 space-y-6 px-4">
         <!-- Parent Question -->
         <div v-if="question.parent" class="relative">
           <!-- Vertical line connecting to current question -->
           <div class="absolute left-4 top-8 bottom-[-24px] w-px bg-border"></div>
-          
+
           <div class="border rounded-lg p-4 bg-muted/40 border-dashed relative z-10">
             <div class="flex items-center gap-2 mb-2">
               <Badge variant="outline" class="bg-background">母题</Badge>
@@ -91,22 +91,18 @@ const isOpen = computed({
         <div class="relative" :class="{ 'pl-8': question.parent }">
           <!-- Connector from parent -->
           <div v-if="question.parent" class="absolute left-0 top-1/2 w-8 h-px bg-border -translate-y-1/2 hidden"></div> <!-- Simplified vertical flow instead -->
-          
+
           <div class="absolute left-4 top-8 bottom-0 w-px bg-border" v-if="question.children?.length"></div>
-          
+
           <div class="border rounded-lg p-4 bg-card shadow-sm relative z-10 ring-2 ring-primary/10">
             <div class="flex items-center gap-2 mb-2">
               <Badge variant="default">当前题目</Badge>
               <span class="text-sm text-muted-foreground">ID: {{ question.id }}</span>
             </div>
             <RichContent :content="question.content" class="text-sm" />
-            
-            <!-- Knowledge Points -->
-            <div v-if="question.knowledge_points?.length" class="mt-3 flex flex-wrap gap-2">
-              <Badge v-for="kp in question.knowledge_points" :key="kp.id" variant="outline" class="text-xs">
-                <BookOpen class="w-3 h-3 mr-1" />
-                {{ kp.name }}
-              </Badge>
+
+            <div class="mt-3 flex flex-wrap gap-2">
+
             </div>
           </div>
 
@@ -116,24 +112,20 @@ const isOpen = computed({
               <!-- Connector -->
               <div class="absolute -left-8 top-6 w-8 h-px bg-border"></div>
               <div class="absolute -left-8 top-6 w-2 h-2 rounded-full bg-border -translate-x-1/2"></div>
-              
+
               <div class="border rounded-lg p-4 bg-muted/30">
                 <div class="flex items-center gap-2 mb-2">
                   <span class="text-sm text-muted-foreground">ID: {{ child.id }}</span>
                 </div>
                 <RichContent :content="child.content" class="text-sm" />
-                
-                <!-- Child Knowledge Points -->
-                <div v-if="child.knowledge_points?.length" class="mt-3 flex flex-wrap gap-2">
-                  <Badge v-for="kp in child.knowledge_points" :key="kp.id" variant="outline" class="text-xs">
-                    <BookOpen class="w-3 h-3 mr-1" />
-                    {{ kp.name }}
-                  </Badge>
+
+                <div class="mt-3 flex flex-wrap gap-2">
+
                 </div>
               </div>
             </div>
           </div>
-          
+
           <div v-else class="mt-4 text-sm text-muted-foreground italic pl-4">
             暂无拆解步骤
           </div>

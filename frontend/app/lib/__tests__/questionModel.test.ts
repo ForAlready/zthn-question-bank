@@ -10,9 +10,35 @@ import {
     pruneAnswerOptionRef,
     validateQuestionDraft,
     buildQuestionPayload,
+    buildQuestionPatch,
+    isMetadataOnlyPatch,
     createEmptyDraft,
 } from '@/lib/questionModel'
 import { answerToPlainText, optionLabelsForAnswer } from '@/lib/answerFormat'
+
+describe('标签编辑与历史答案', () => {
+    it('只提交标签改动，保留历史答案和知识点关联', () => {
+        const initial = createEmptyDraft({ subjectId: 1 })
+        initial.answer = { kind: 'legacy_unresolved', expected_kind: 'single_choice', raw: null }
+        initial.tag_ids = [8]
+        initial.knowledge_point_ids = [9]
+        const edited = structuredClone(initial)
+        edited.tag_ids = [10, 20]
+        const patch = buildQuestionPatch(edited, initial)
+        expect(patch).toEqual({ tag_ids: [10, 20] })
+        expect(isMetadataOnlyPatch(patch)).toBe(true)
+        edited.content = doc('新题干')
+        expect(isMetadataOnlyPatch(buildQuestionPatch(edited, initial))).toBe(false)
+    })
+    it('明确区分不改标签与清空标签', () => {
+        const initial = createEmptyDraft()
+        initial.tag_ids = [10]
+        expect(buildQuestionPatch(structuredClone(initial), initial)).toEqual({})
+        const edited = structuredClone(initial)
+        edited.tag_ids = []
+        expect(buildQuestionPatch(edited, initial)).toEqual({ tag_ids: [] })
+    })
+})
 
 function doc(text: string): RichDoc {
     return { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] }

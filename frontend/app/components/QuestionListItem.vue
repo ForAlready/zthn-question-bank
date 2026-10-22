@@ -179,6 +179,7 @@ const tags = computed(() => {
   return item.tags || []
 })
 
+
 const dbOptions = computed<OptionSpec[]>(() => (props.item as DbQuestion).options || [])
 const importOptions = computed<OptionSpec[]>(() => (props.item as ImportDraft).options || [])
 
@@ -374,7 +375,7 @@ const sourceFileUrl = computed(() => {
             >
               <Copy class="h-4 w-4" />
             </Button>
-            
+
             <Button
               v-if="!hideDelete && mode !== 'library'"
               variant="ghost"
@@ -385,7 +386,7 @@ const sourceFileUrl = computed(() => {
             >
               <Trash2 class="h-4 w-4" />
             </Button>
-            
+
 
           </div>
         </div>
@@ -404,7 +405,7 @@ const sourceFileUrl = computed(() => {
           <div v-else class="prose prose-sm max-w-none dark:prose-invert text-sm mb-2">
             <RichContent :content="(item as ImportDraft).content" empty-text="（空）" />
           </div>
-          
+
           <!-- Options for choice questions -->
           <div v-if="mode === 'library' && dbOptions.length > 0 && (item.q_type === 'single_choice' || item.q_type === 'multiple_choice')" class="mt-2 mb-3 flex flex-wrap gap-x-6 gap-y-1.5">
             <div v-for="opt in dbOptions" :key="opt.id" class="flex max-w-full gap-2 items-baseline text-xs">
@@ -423,36 +424,14 @@ const sourceFileUrl = computed(() => {
             </div>
           </div>
 
-          <!-- Knowledge Points & Tags (library mode) -->
-          <div v-if="mode === 'library' && (knowledgePoints.length > 0 || tags.length > 0)" class="mt-4 flex flex-wrap gap-2">
-            <Badge v-for="kp in knowledgePoints" :key="kp.id" variant="secondary" class="text-xs">
-              {{ kp.name }}
-            </Badge>
-            <Badge 
-              v-for="tag in tags" 
-              :key="tag.id" 
-              variant="outline" 
-              class="text-xs"
-              :style="{ borderColor: tag.color, color: tag.color }"
-            >
-              {{ tag.name }}
-            </Badge>
+          <div v-if="mode === 'library'" class="mt-4 flex flex-wrap gap-2">
+
           </div>
 
           <!-- Info badges (import mode) -->
           <div v-if="mode === 'import'" class="flex gap-2 flex-wrap">
             <Badge variant="secondary" class="text-xs">{{ difficultyLabel }}</Badge>
-            <template v-if="knowledgePointIds.length > 0">
-               <template v-if="allKnowledgePoints && allKnowledgePoints.length > 0">
-                  <Badge v-for="id in knowledgePointIds" :key="id" variant="secondary" class="text-xs">
-                    {{ allKnowledgePoints.find(kp => kp.id === id)?.name || id }}
-                  </Badge>
-               </template>
-               <Badge v-else variant="secondary" class="text-xs">
-                  {{ knowledgePointIds.length }} 个知识点
-               </Badge>
-            </template>
-            <Badge v-else variant="outline" class="text-xs text-orange-600">未选择知识点</Badge>
+
           </div>
         </div>
 

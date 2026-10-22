@@ -3,8 +3,6 @@ import { ref, computed, watch } from 'vue'
 import type {
   Question,
   KnowledgePoint,
-  TagCategory,
-  TagPage,
   Subject,
   QuestionType,
   OptionSpec,
@@ -17,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
-import { Plus, Trash2, Save, Loader2, Check, ChevronsUpDown, X } from '@lucide/vue'
+import { Plus, Trash2, Save, Loader2, X } from '@lucide/vue'
 import {
   Select,
   SelectContent,
@@ -25,23 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command'
-import { Badge } from '@/components/ui/badge'
-import { cn } from '@/lib/utils'
 import { toast } from 'vue-sonner'
-import KnowledgePointSelector from './KnowledgePointSelector.vue'
 import AnswerEditor from './AnswerEditor.vue'
 import AnswerDisplay from './AnswerDisplay.vue'
 import RichEditor from './rich-editor/RichEditor.vue'
@@ -50,6 +32,8 @@ import {
   type QuestionDraft,
   type ImportDraft,
   buildQuestionPayload,
+  buildQuestionPatch,
+  isMetadataOnlyPatch,
   cloneImportDraft,
   createDefaultOptions,
   createEmptyDraft,
@@ -87,11 +71,12 @@ const isImportMode = computed(() => props.mode === 'import')
 
 // 所有模式统一走 v2 RichDoc 草稿；import 模式只是不落库，保存时把草稿回抛给评审列表。
 const draft = ref<QuestionDraft | null>(null)
+const initialDraft = ref<QuestionDraft | null>(null)
 // import 模式下随草稿一起回抛的列表态（列表 key / 选中 / 警告 / AI 建议标签）。
 const importMeta = ref<Pick<ImportDraft, 'uid' | 'selected' | 'warnings' | 'ai_suggested_tags' | 'raw_type_name' | 'raw_answer'> | null>(null)
+const suggestedLabels = computed(() => [...new Set(Object.values(importMeta.value?.ai_suggested_tags ?? {}).flat())])
 
 const isSubmitting = ref(false)
-const openTagSelect = ref(false)
 
 const activeSubjectId = computed<number | undefined>(
   () =>
@@ -99,33 +84,6 @@ const activeSubjectId = computed<number | undefined>(
     ?? props.autoFillSubjectId
     ?? undefined,
 )
-
-const { data: tagsPage, refresh: refreshTags } = useAPI<TagPage>('/tags', {
-  query: computed(() => ({ subject_id: activeSubjectId.value || undefined, size: -1 })), // 标签选择器需要全部标签，不分页
-  immediate: false,
-  watch: false,
-})
-const tags = computed(() => tagsPage.value?.items)
-const { data: tagCategories, refresh: refreshTagCategories } = useAPI<TagCategory[]>('/tag-categories', {
-  query: computed(() => ({ subject_id: activeSubjectId.value || undefined })),
-  immediate: false,
-  watch: false,
-})
-
-watch(activeSubjectId, (newId) => {
-  if (newId) {
-    refreshTags()
-    refreshTagCategories()
-  }
-}, { immediate: true })
-
-const availableKnowledgePoints = computed(() => {
-  if (!props.knowledgePoints) return []
-  if (activeSubjectId.value) {
-    return props.knowledgePoints.filter(kp => kp.subject_id == activeSubjectId.value)
-  }
-  return []
-})
 
 // --- shared field accessors (draft is the single edit state for all modes) ---
 const qType = computed<QuestionType | undefined>({
@@ -139,13 +97,6 @@ const difficulty = computed<number>({
   get: () => draft.value?.difficulty ?? 3,
   set: (v) => {
     if (draft.value) draft.value.difficulty = v
-  },
-})
-
-const knowledgePointIds = computed<number[]>({
-  get: () => draft.value?.knowledge_point_ids ?? [],
-  set: (v) => {
-    if (draft.value) draft.value.knowledge_point_ids = v
   },
 })
 
@@ -169,7 +120,6 @@ function switchDraftType(d: QuestionDraft, newType: QuestionType) {
 }
 
 const initState = () => {
-  openTagSelect.value = false
   if (isImportMode.value) {
     const fallbackSubject = props.autoFillSubjectId ?? undefined
     const src = props.question as ImportDraft | null
@@ -197,9 +147,11 @@ const initState = () => {
   }
 }
 
-watch(() => props.question, initState, { immediate: true })
-watch(() => props.open, (isOpen) => { if (isOpen) initState() })
-watch(() => props.mode, initState)
+// 留存独立的初始快照用于生成差量请求，避免将未编辑的历史内容一并提交。
+const initialize = () => { initState(); initialDraft.value = draft.value ? JSON.parse(JSON.stringify(draft.value)) : null }
+watch(() => props.question, initialize, { immediate: true })
+watch(() => props.open, (isOpen) => { if (isOpen) { initialize() } })
+watch(() => props.mode, initialize)
 
 const title = computed(() => (props.mode === 'edit' ? '编辑题目' : '新增题目'))
 
@@ -232,14 +184,16 @@ const handleSaveImport = () => {
 
 const handlePublish = async () => {
   if (!draft.value) return
-  const error = validateQuestionDraft(draft.value)
+  const patch = props.mode === 'edit' && initialDraft.value ? buildQuestionPatch(draft.value, initialDraft.value) : null
+  // 标签等元数据变更不要求修复历史答案；与后端的元数据更新路径保持一致。
+  const error = patch && isMetadataOnlyPatch(patch) ? null : validateQuestionDraft(draft.value)
   if (error) {
     toast.error(error)
     return
   }
   isSubmitting.value = true
   try {
-    const payload = buildQuestionPayload(draft.value)
+    const payload = patch ?? buildQuestionPayload(draft.value)
     let saved: Question
     if (props.mode === 'edit' && draft.value.id) {
       saved = await $api<Question>(`/questions/${draft.value.id}`, { method: 'PUT', body: payload })
@@ -267,17 +221,6 @@ const onInteractOutside = (event: Event) => {
   }
 }
 
-// --- tags (db mode only) ---
-const selectedTags = computed(() => {
-  if (!tags.value || !draft.value) return []
-  return tags.value.filter(t => draft.value!.tag_ids.includes(t.id))
-})
-const toggleTag = (tagId: number) => {
-  if (!draft.value) return
-  const idx = draft.value.tag_ids.indexOf(tagId)
-  if (idx === -1) draft.value.tag_ids.push(tagId)
-  else draft.value.tag_ids.splice(idx, 1)
-}
 </script>
 
 <template>
@@ -379,78 +322,11 @@ const toggleTag = (tagId: number) => {
                   </Select>
                 </div>
 
-                <!-- Knowledge Points -->
-                <div class="space-y-2">
-                  <Label>所属知识点</Label>
-                  <div v-if="!activeSubjectId" class="text-xs text-muted-foreground mb-1">请先选择学科以加载知识点</div>
-                  <KnowledgePointSelector
-                    v-model="knowledgePointIds"
-                    :knowledge-points="availableKnowledgePoints"
-                    :disabled="!activeSubjectId"
-                  />
-                </div>
-
-                <!-- Tags (db only) -->
-                <div v-if="!isImportMode && draft" class="space-y-2">
+                <!-- Categories -->
+                <div v-if="draft" class="space-y-2">
                   <Label>标签</Label>
-                  <div class="flex flex-wrap gap-2 mb-2" v-if="selectedTags.length > 0">
-                    <Badge
-                      v-for="tag in selectedTags"
-                      :key="tag.id"
-                      variant="secondary"
-                      :style="{ backgroundColor: tag.color + '20', color: tag.color, borderColor: tag.color }"
-                      class="border pl-2 pr-1 py-1 flex items-center gap-1"
-                    >
-                      {{ tag.name }}
-                      <button class="hover:bg-background/50 rounded-full p-0.5 transition-colors" @click.stop="toggleTag(tag.id)">
-                        <X class="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  </div>
-                  <Popover v-model:open="openTagSelect">
-                    <PopoverTrigger as-child>
-                      <Button variant="outline" role="combobox" :aria-expanded="openTagSelect" class="w-full justify-between">
-                        选择标签...
-                        <ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent class="w-[400px] p-0" align="start">
-                      <Command>
-                        <CommandInput placeholder="搜索标签..." />
-                        <CommandEmpty>未找到标签</CommandEmpty>
-                        <CommandList>
-                          <CommandGroup v-for="cat in tagCategories" :key="cat.id" :heading="cat.name">
-                            <CommandItem
-                              v-for="tag in tags?.filter(t => t.category_id === cat.id)"
-                              :key="tag.id"
-                              :value="tag.name"
-                              @select="toggleTag(tag.id)"
-                            >
-                              <Check :class="cn('mr-2 h-4 w-4', draft.tag_ids.includes(tag.id) ? 'opacity-100' : 'opacity-0')" />
-                              <div class="flex items-center gap-2">
-                                <div class="w-3 h-3 rounded-full" :style="{ backgroundColor: tag.color }"></div>
-                                {{ tag.name }}
-                              </div>
-                            </CommandItem>
-                          </CommandGroup>
-                          <CommandGroup heading="其他">
-                            <CommandItem
-                              v-for="tag in tags?.filter(t => t.category_id == null || !tagCategories?.find(c => c.id === t.category_id))"
-                              :key="tag.id"
-                              :value="tag.name"
-                              @select="toggleTag(tag.id)"
-                            >
-                              <Check :class="cn('mr-2 h-4 w-4', draft.tag_ids.includes(tag.id) ? 'opacity-100' : 'opacity-0')" />
-                              <div class="flex items-center gap-2">
-                                <div class="w-3 h-3 rounded-full" :style="{ backgroundColor: tag.color }"></div>
-                                {{ tag.name }}
-                              </div>
-                            </CommandItem>
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                  <FlatTagSelect v-if="draft" v-model="draft.tag_ids" :subject-id="activeSubjectId" />
+                  <p v-if="isImportMode && suggestedLabels.length" class="text-xs text-muted-foreground">提取的标签建议：{{ suggestedLabels.join('、') }}。未匹配的建议请人工确认。</p>
                 </div>
 
                 <!-- ================= v2 editors (all modes) ================= -->

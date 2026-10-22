@@ -148,6 +148,7 @@ export function dbQuestionToDraft(
         visibility: (q.visibility ?? 'public') as 'public' | 'private',
         options,
         answer: q.answer ? (JSON.parse(JSON.stringify(q.answer)) as AnswerSpec) : null,
+        thinking: cloneRich(q.thinking),
         analysis: cloneRich(q.analysis),
         summary: cloneRich(q.summary),
         source: q.source ?? '',
@@ -316,6 +317,21 @@ export function buildQuestionPayload(draft: QuestionDraft): QuestionWritePayload
 
 function isRichEmpty(doc: RichDoc): boolean {
     return !doc || !doc.content || doc.content.length === 0
+}
+
+/** 仅提交相对初始草稿变化的字段，避免标签编辑附带重写历史答案。 */
+export function buildQuestionPatch(draft: QuestionDraft, initial: QuestionDraft): Partial<QuestionWritePayload> {
+    const current = buildQuestionPayload(draft)
+    const before = buildQuestionPayload(initial)
+    return Object.fromEntries(Object.entries(current).filter(([key, value]) =>
+        JSON.stringify(value) !== JSON.stringify(before[key as keyof QuestionWritePayload]),
+    )) as Partial<QuestionWritePayload>
+}
+
+/** 判断是否仅含元数据，供编辑器跳过内容校验；内容修订号由后端决定。 */
+export function isMetadataOnlyPatch(patch: Partial<QuestionWritePayload>): boolean {
+    const fields = new Set(['tag_ids', 'knowledge_point_ids', 'difficulty', 'source', 'parent_id', 'visibility', 'subject_id'])
+    return Object.keys(patch).every(key => fields.has(key))
 }
 
 /**

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { apiErrorMessage } from '~/lib/apiError'
 import { ref, computed } from 'vue'
 import { useAPI } from '~/composables/useAPI'
 import type { Tag, TagCategory, TagPage } from '~/types'
@@ -104,7 +105,7 @@ const isEditing = ref(false)
 const currentTag = ref<Partial<Tag>>({
     name: '',
     category_id: null,
-    color: '#grey'
+    color: '#grey', enabled: true
 })
 
 // Category Management State (sidebar owns the inline add/edit form UI, this page owns the API calls)
@@ -126,10 +127,10 @@ const categories = computed(() => {
 
 const currentCategoryLabel = computed(() => {
     if (selectedCategory.value === 'all') return '全部'
-    return categories.value.find(c => c.value === selectedCategory.value)?.label || '未分类'
+    return categories.value.find(c => c.value === selectedCategory.value)?.label || '未分组'
 })
 
-// Select 组件用字符串值，'none' 代表未分类（category_id = null）
+// Select 组件用字符串值，'none' 代表未分组（category_id = null）
 const categorySelectValue = computed<string>({
     get: () => currentTag.value.category_id != null ? String(currentTag.value.category_id) : 'none',
     set: (v) => { currentTag.value.category_id = v === 'none' ? null : Number(v) }
@@ -145,7 +146,7 @@ const openCreateDialog = () => {
     currentTag.value = {
         name: '',
         category_id: selectedCategory.value !== 'all' ? selectedCategory.value : null,
-        color: '#grey'
+        color: '#grey', enabled: true
     }
     isDialogOpen.value = true
 }
@@ -158,7 +159,7 @@ const openEditDialog = (tag: Tag) => {
 
 const openCreateDialogForCategory = (categoryId: number) => {
     isEditing.value = false
-    currentTag.value = { name: '', category_id: categoryId, color: '#grey' }
+    currentTag.value = { name: '', category_id: categoryId, color: '#grey', enabled: true }
     isDialogOpen.value = true
     isMobileCategorySheetOpen.value = false
 }
@@ -168,7 +169,7 @@ const saveTag = async () => {
         if (isEditing.value && currentTag.value.id) {
             await $api(`/tags/${currentTag.value.id}`, {
                 method: 'PUT',
-                body: currentTag.value
+                body: { name: currentTag.value.name, color: currentTag.value.color, category_id: currentTag.value.category_id, enabled: currentTag.value.enabled }
             })
             toast.success('标签更新成功')
         } else {
@@ -182,10 +183,16 @@ const saveTag = async () => {
         isDialogOpen.value = false
     } catch (error: any) {
         console.error('Failed to save tag', error)
-        toast.error(error.data?.detail || '保存标签失败')
+        toast.error(apiErrorMessage(error,'保存标签失败'))
     }
 }
 
+const showReferences = async (id:number) => {
+    try {
+        const r = await $api<{question_count:number;template_count:number}>('/tags/'+id+'/references')
+        toast.info('引用情况：'+r.question_count+'道题，'+r.template_count+'个模板')
+    } catch (e) { toast.error(apiErrorMessage(e,'引用读取失败')) }
+}
 const deleteTag = async (id: number) => {
     if (!confirm('确定要删除这个标签吗？')) return
     try {
@@ -194,7 +201,7 @@ const deleteTag = async (id: number) => {
         // Deleting the last tag on a page (not page 1) would otherwise leave an empty page.
         if (tags.value.length === 0 && page.value > 1) page.value -= 1
     } catch (error) {
-        console.error('Failed to delete tag', error)
+        toast.error(apiErrorMessage(error,'删除失败，请检查引用'))
     }
 }
 
@@ -244,10 +251,10 @@ const saveCategory = async () => {
         await refreshCategories()
         editingCategoryId.value = null
         editingCategory.value = {}
-        toast.success('分类更新成功')
+        toast.success('分组更新成功')
     } catch (error: any) {
         console.error('Failed to update category', error)
-        toast.error(error.data?.detail || '更新分类失败')
+        toast.error(error.data?.detail || '更新分组失败')
     }
 }
 
@@ -268,25 +275,25 @@ const createCategory = async () => {
         await refreshCategories()
         newCategory.value = { name: '', sort_order: 0, is_active: true }
         isAddingCategory.value = false
-        toast.success('分类创建成功')
+        toast.success('分组创建成功')
     } catch (error: any) {
         console.error('Failed to create category', error)
-        toast.error(error.data?.detail || '创建分类失败')
+        toast.error(error.data?.detail || '创建分组失败')
     }
 }
 
 const deleteCategory = async (id: number) => {
-    if (!confirm('确定要删除这个分类吗？这将同时删除该分类下的所有标签！')) return
+    if (!confirm('确定删除此空分组？有标签的分组不能删除。')) return
     try {
         await $api(`/tag-categories/${id}`, { method: 'DELETE' })
         await refreshCategories()
         if (selectedCategory.value === id) {
             selectedCategory.value = 'all'
         }
-        toast.success('分类删除成功')
+        toast.success('分组删除成功')
     } catch (error) {
         console.error('Failed to delete category', error)
-        toast.error('删除分类失败')
+        toast.error(apiErrorMessage(error,'分组非空，不能删除'))
     }
 }
 </script>
@@ -337,7 +344,7 @@ const deleteCategory = async (id: number) => {
                             </SheetTrigger>
                             <SheetContent side="left" class="w-72 p-4">
                                 <SheetHeader class="p-0">
-                                    <SheetTitle>标签分类</SheetTitle>
+                                    <SheetTitle>标签分组</SheetTitle>
                                 </SheetHeader>
                                 <TagCategorySidebar
                                     class="mt-4"
@@ -379,8 +386,8 @@ const deleteCategory = async (id: number) => {
                                 </TableHead>
                                 <TableHead>ID</TableHead>
                                 <TableHead>名称</TableHead>
-                                <TableHead>分类</TableHead>
-                                <TableHead>颜色</TableHead>
+                                <TableHead>分组</TableHead>
+                                <TableHead>颜色</TableHead><TableHead>启用状态</TableHead>
                                 <TableHead class="text-right">操作</TableHead>
                             </TableRow>
                         </TableHeader>
@@ -399,7 +406,7 @@ const deleteCategory = async (id: number) => {
                                     </Badge>
                                 </TableCell>
                                 <TableCell>
-                                    <Badge variant="secondary">{{ categories.find(c => c.value === tag.category_id)?.label || '未分类' }}</Badge>
+                                    <Badge variant="secondary">{{ categories.find(c => c.value === tag.category_id)?.label || '未分组' }}</Badge>
                                 </TableCell>
                                 <TableCell>
                                     <div class="flex items-center gap-2">
@@ -409,7 +416,7 @@ const deleteCategory = async (id: number) => {
                                         <span class="text-sm text-muted-foreground">{{ tag.color }}</span>
                                     </div>
                                 </TableCell>
-                                <TableCell class="text-right">
+                                <TableCell>{{ tag.enabled === false ? '已停用' : '启用' }}</TableCell><TableCell class="text-right"><Button v-if="canManage" variant="ghost" size="sm" @click="showReferences(tag.id)">引用</Button>
                                     <div class="flex justify-end gap-2">
                                         <Button v-if="canManage" variant="ghost" size="icon" @click="openEditDialog(tag)">
                                             <Pencil class="w-4 h-4" />
@@ -422,7 +429,7 @@ const deleteCategory = async (id: number) => {
                                 </TableCell>
                             </TableRow>
                             <TableRow v-if="tags.length === 0">
-                                <TableCell colspan="5" class="text-center py-8 text-muted-foreground">
+                                <TableCell colspan="7" class="text-center py-8 text-muted-foreground">
                                     暂无标签
                                 </TableCell>
                             </TableRow>
@@ -464,7 +471,7 @@ const deleteCategory = async (id: number) => {
                     <DialogHeader>
                         <DialogTitle>{{ isEditing ? '编辑标签' : '新建标签' }}</DialogTitle>
                         <DialogDescription>
-                            配置标签的名称、分类和颜色。
+                            配置标签的名称、分组和颜色。
                         </DialogDescription>
                     </DialogHeader>
 
@@ -475,13 +482,13 @@ const deleteCategory = async (id: number) => {
                         </div>
 
                         <div class="grid gap-2">
-                            <label>分类</label>
+                            <label>分组</label>
                             <Select v-model="categorySelectValue">
                                 <SelectTrigger>
-                                    <SelectValue placeholder="选择分类" />
+                                    <SelectValue placeholder="选择分组" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="none">未分类</SelectItem>
+                                    <SelectItem value="none">未分组</SelectItem>
                                     <SelectItem v-for="cat in categories" :key="cat.value" :value="String(cat.value)">
                                         {{ cat.label }}
                                     </SelectItem>
@@ -499,7 +506,8 @@ const deleteCategory = async (id: number) => {
                         </div>
                     </div>
 
-                    <DialogFooter>
+                    <label class="flex items-center gap-2 text-sm"><input v-model="currentTag.enabled" type="checkbox" />启用标签（停用保留原关联，引用模板将暂停出卷）</label>
+          <DialogFooter>
                         <Button variant="outline" @click="isDialogOpen = false">取消</Button>
                         <Button :disabled="!currentTag.name?.trim()" @click="saveTag">保存</Button>
                     </DialogFooter>
