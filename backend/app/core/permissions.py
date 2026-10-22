@@ -29,21 +29,36 @@ class Permission(str, enum.Enum):
     """权限(动作)枚举。加新动作 = 加一个值,并在 ROLE_PERMISSIONS 里授予。"""
     VIEW_QUESTION = "view_question"
     EDIT_QUESTION = "edit_question"
-    MANAGE_SUBJECT = "manage_subject"    # 改学科配置/知识点/标签
+    MANAGE_SUBJECT = "manage_subject"    # 改学科配置/知识点/标签/分类/题型
     MANAGE_MEMBERS = "manage_members"    # 在本学科内分配成员与角色
     VIEW_PRIVATE_ANY = "view_private_any"  # 查看他人私有题(v1 仅 admin)
+    # 一期出卷能力：出卷人(editor+)可生成试卷并导出无答案；有答案导出需显式权限（默认仅 admin）。
+    MANAGE_PAPER_TEMPLATE = "manage_paper_template"
+    GENERATE_PAPER = "generate_paper"
+    EXPORT_PAPER_WITHOUT_ANSWERS = "export_paper_without_answers"
+    EXPORT_WITH_ANSWERS = "export_with_answers"
 
 
 # 唯一的角色→权限映射。admin 单独走全量,不在此表内。
 ROLE_PERMISSIONS: dict[SubjectRole, frozenset[Permission]] = {
     SubjectRole.VIEWER: frozenset({Permission.VIEW_QUESTION}),
-    SubjectRole.EDITOR: frozenset({Permission.VIEW_QUESTION, Permission.EDIT_QUESTION}),
+    SubjectRole.EDITOR: frozenset(
+        {
+            Permission.VIEW_QUESTION,
+            Permission.EDIT_QUESTION,
+            Permission.GENERATE_PAPER,
+            Permission.EXPORT_PAPER_WITHOUT_ANSWERS,
+        }
+    ),
     SubjectRole.MANAGER: frozenset(
         {
             Permission.VIEW_QUESTION,
             Permission.EDIT_QUESTION,
             Permission.MANAGE_SUBJECT,
             Permission.MANAGE_MEMBERS,
+            Permission.MANAGE_PAPER_TEMPLATE,
+            Permission.GENERATE_PAPER,
+            Permission.EXPORT_PAPER_WITHOUT_ANSWERS,
         }
     ),
 }
